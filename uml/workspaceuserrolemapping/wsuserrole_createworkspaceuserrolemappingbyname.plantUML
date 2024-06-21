@@ -1,0 +1,21 @@
+@startuml
+
+title "CreateWorkspaceUserRoleMappingByName"
+
+actor User as user
+
+participant "app.go" as app
+participant "workspace_user_role_mappings.go" as controller
+participant "workspace_user_role_mappingsHandler.go" as handler
+participant "Database" as db
+
+user    -> app : POST: /api/wsuserrole
+app    -> controller : CreateWorkspaceUserRoleMapping()
+controller -> handler : CreateWorkspaceUserRoleMapping()
+handler -> db : CreateWorkspaceUserRoleMapping
+db -> handler :
+handler -> controller : WUR Mapping One
+controller -> app : WUR Mapping One
+user <- app : return successMessage | WUR Mapping One
+
+@enduml

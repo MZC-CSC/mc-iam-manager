@@ -1,0 +1,18 @@
+@startuml
+
+title "Security key"
+
+actor User as user
+
+participant "app.go" as app
+participant "auth.go" as controller
+participant "provider" as provider
+
+user    -> app : GET: /api/sts/securitykey
+app    -> controller : AuthGetSecurityKeyHandler(bearer token, provider)
+controller -> provider : call csp credential
+provider -> controller : return securityToken
+controller -> app :
+user <- app : return successMessage | securityToken
+
+@enduml

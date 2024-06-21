@@ -1,0 +1,21 @@
+@startuml
+
+title "Delete Role"
+
+actor User as user
+
+participant "app.go" as app
+participant "roles.go" as controller
+participant "rolesHandler.go" as handler
+participant "Database" as db
+
+user    -> app : DELETE: /api/role/role/id/{roleId}
+app    -> controller : DeleteRole
+controller -> handler : DeleteRole
+handler -> db :
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | json message
+
+@enduml

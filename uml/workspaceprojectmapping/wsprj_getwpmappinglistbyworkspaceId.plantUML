@@ -1,0 +1,23 @@
+@startuml
+
+title "GetWPmappingListByWorkspaceId"
+
+actor User as user
+
+participant "app.go" as app
+participant "workspace_project_mappings.go" as controller
+participant "workspace_project_mappingsHandler.go" as handler
+participant "Database" as db
+
+user    -> app : GET: /api/wspjr
+app    -> controller : GetWPmappingListByWorkspaceId
+controller -> handler : GetWPmappingListByWorkspaceId
+handler -> db :
+db -> handler : return WPmappingList
+handler -> db : GetProjectById
+db -> handler : return ProjectList
+handler -> controller : WPmappingList
+controller -> app : WPmappingList
+user <- app : return successMessage | WPmappingList
+
+@enduml

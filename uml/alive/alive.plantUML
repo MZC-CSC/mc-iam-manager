@@ -1,0 +1,12 @@
+@startuml
+
+title "Alive"
+
+actor User as user
+
+participant "app.go" as app
+
+user    -> app : GET: /alive
+user <- app : return successMessage | json
+
+@enduml

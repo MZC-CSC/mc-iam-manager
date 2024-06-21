@@ -1,0 +1,21 @@
+@startuml
+
+title "SearchProjectByName"
+
+actor User as user
+
+participant "app.go" as app
+participant "projects.go" as controller
+participant "projectsHandler.go" as handler
+participant "Database" as db
+
+user    -> app : GET: /api/prj/project/id/{projectId}
+app    -> controller : SearchProjectsByName
+controller -> handler : SearchProjectsByName
+handler -> db : return ProjectList
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | ProjectList
+
+@enduml

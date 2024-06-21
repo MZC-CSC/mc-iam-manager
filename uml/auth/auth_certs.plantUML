@@ -1,0 +1,18 @@
+@startuml
+
+title "GetCerts"
+
+actor User as user
+
+participant "app.go" as app
+participant "mcimw.go" as mcimw
+participant "keycloak" as keycloak
+
+user    -> app : GET: /api/auth/certs
+app    -> mcimw : BeginAuthHandler
+mcimw -> keycloak : AuthGetCerts
+keycloak -> mcimw :
+mcimw -> app :
+user <- app : return successMessage | json
+
+@enduml

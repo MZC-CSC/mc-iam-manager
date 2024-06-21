@@ -1,0 +1,18 @@
+@startuml
+
+title "Login Refresh"
+
+actor User as user
+
+participant "app.go" as app
+participant "mcimw.go" as mcimw
+participant "keycloak" as keycloak
+
+user    -> app : POST: /api/auth/login/refresh
+app    -> mcimw : BeginAuthHandler
+mcimw -> keycloak : AuthLoginRefreshHandler, call access token with refresh token
+keycloak -> mcimw : return token
+mcimw -> app : return token
+user <- app : return successMessage | json, with token
+
+@enduml

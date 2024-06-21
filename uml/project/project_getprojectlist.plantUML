@@ -1,0 +1,21 @@
+@startuml
+
+title "GetProjectList"
+
+actor User as user
+
+participant "app.go" as app
+participant "projects.go" as controller
+participant "projectsHandler.go" as handler
+participant "Database" as db
+
+user    -> app : GET: /api/prj
+app    -> controller : GetProjectList
+controller -> handler : GetProjectList
+handler -> db : return ProjectList
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | ProjectList
+
+@enduml

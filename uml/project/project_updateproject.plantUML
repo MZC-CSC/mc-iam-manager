@@ -1,0 +1,21 @@
+@startuml
+
+title "Update Project"
+
+actor User as user
+
+participant "app.go" as app
+participant "projects.go" as controller
+participant "projectsHandler.go" as handler
+participant "Database" as db
+
+user    -> app : PUT: /api/prj/project/id/{projectId}
+app    -> controller : UpdateProject
+controller -> handler : UpdateProject
+handler -> db :
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | json message
+
+@enduml

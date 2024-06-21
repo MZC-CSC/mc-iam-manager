@@ -1,0 +1,25 @@
+@startuml
+
+title "CreateWPmapping"
+
+actor User as user
+
+participant "app.go" as app
+participant "workspace_project_mappings.go" as controller
+participant "workspace_project_mappingsHandler.go" as handler
+participant "Database" as db
+
+user    -> app : POST: /api/wspjr
+app    -> controller : CreateWPmappings()
+controller -> handler : CreateWPmappings()
+handler -> db : CreateWPmapping
+db -> handler :
+handler -> controller :
+controller -> handler : GetWPmappingListByWorkspaceId()
+handler -> db : GetWPmappingListByWorkspaceId
+db -> handler : WP Mapping One
+handler -> controller : WP Mapping One
+controller -> app : WP Mapping One
+user <- app : return successMessage | WP Mapping One
+
+@enduml

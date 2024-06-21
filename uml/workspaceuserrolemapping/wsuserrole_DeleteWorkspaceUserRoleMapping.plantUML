@@ -1,0 +1,21 @@
+@startuml
+
+title "CreateWorkspaceUserRoleMappingByName"
+
+actor User as user
+
+participant "app.go" as app
+participant "workspace_user_role_mappings.go" as controller
+participant "workspace_user_role_mappingsHandler.go" as handler
+participant "Database" as db
+
+user    -> app : POST: /api/wsuserrole
+app    -> controller : DeleteWorkspaceUserRoleMapping()
+controller -> handler : DeleteWorkspaceUserRoleMapping(workspaceId, UserId)
+handler -> db : DeleteWorkspaceUserRoleMapping
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | json message
+
+@enduml

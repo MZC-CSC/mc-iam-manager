@@ -1,0 +1,18 @@
+@startuml
+
+title "UserInfo"
+
+actor User as user
+
+participant "app.go" as app
+participant "mcimw.go" as mcimw
+participant "keycloak" as keycloak
+
+user    -> app : GET: /api/auth/userinfo
+app    -> mcimw : BeginAuthHandler
+mcimw -> keycloak : AuthGetUserInfo
+keycloak -> mcimw : return keycloak.userinfo
+mcimw -> app :
+user <- app : return successMessage | json
+
+@enduml

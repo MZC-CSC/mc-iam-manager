@@ -1,0 +1,18 @@
+@startuml
+
+title "LogOut"
+
+actor User as user
+
+participant "app.go" as app
+participant "mcimw.go" as mcimw
+participant "keycloak" as keycloak
+
+user    -> app : POST: /api/auth/logout
+app    -> mcimw : BeginAuthHandler
+mcimw -> keycloak : AuthLogoutHandler, call logout with user refresh token
+keycloak -> mcimw :
+mcimw -> app :
+user <- app : return successMessage | json
+
+@enduml

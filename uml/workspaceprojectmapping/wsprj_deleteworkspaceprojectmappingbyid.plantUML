@@ -1,0 +1,25 @@
+@startuml
+
+title "DeleteWorkspaceProjectMappingById"
+
+actor User as user
+
+participant "app.go" as app
+participant "workspace_project_mappings.go" as controller
+participant "workspace_project_mappingsHandler.go" as handler
+participant "Database" as db
+
+user    -> app : DELETE: /api/wsprj/workspace/id/{workspaceId}/project/id/{projectId}
+app    -> controller : DeleteWPmapping()
+controller -> handler : GetWPmappingById() return workspace
+handler -> db :
+db -> handler : return workspaceMapping
+handler -> controller : return workspaceMapping
+controller -> handler : DeleteWPmapping(tx, workspace)
+handler -> db : delete mapping
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | json message
+
+@enduml

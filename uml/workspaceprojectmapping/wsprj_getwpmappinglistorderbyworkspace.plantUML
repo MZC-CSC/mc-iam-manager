@@ -1,0 +1,31 @@
+@startuml
+
+title "GetWPmappingListOrderbyWorkspace"
+
+actor User as user
+
+participant "app.go" as app
+participant "workspace_project_mappings.go" as controller
+participant "workspace_project_mappingsHandler.go" as handler
+participant "workspaceHandler.go" as wsHandler
+participant "projectHandler.go" as pjHandler
+participant "Database" as db
+
+user    -> app : GET: /api/wspjr
+app    -> controller : GetWPmappingListOrderbyWorkspace
+controller -> handler : GetWPmappingListOrderbyWorkspace
+handler -> db :
+db -> handler : return WPmappingList
+handler -> wsHandler : GetWorkspaceById
+wsHandler -> db : return WorkspaceList
+db -> wsHandler : return WorkspaceList
+wsHandler -> handler : return WorkspaceList
+handler -> pjHandler : GetProjectById
+pjHandler -> db : return ProjectList
+db -> pjHandler : return ProjectList
+pjHandler -> handler : return ProjectList
+handler -> controller : WPmappingList
+controller -> app : WPmappingList
+user <- app : return successMessage | WPmappingList
+
+@enduml

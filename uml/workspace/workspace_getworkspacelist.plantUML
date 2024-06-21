@@ -1,0 +1,21 @@
+@startuml
+
+title "GetWorkspaceList"
+
+actor User as user
+
+participant "app.go" as app
+participant "workspaces.go" as controller
+participant "workspacesHandler.go" as handler
+participant "Database" as db
+
+user    -> app : GET: /api/ws
+app    -> controller : GetWorkspaceList
+controller -> handler : GetWorkspaceList
+handler -> db : return WorkspaceList
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | workspaceList
+
+@enduml

@@ -1,0 +1,21 @@
+@startuml
+
+title "Delete Workspace"
+
+actor User as user
+
+participant "app.go" as app
+participant "workspaces.go" as controller
+participant "workspacesHandler.go" as handler
+participant "Database" as db
+
+user    -> app : DELETE: /api/ws/workspace/id/{workspaceId}
+app    -> controller : DeleteWorkspace
+controller -> handler : DeleteWorkspace
+handler -> db :
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | json message
+
+@enduml

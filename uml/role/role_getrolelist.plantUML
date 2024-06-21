@@ -1,0 +1,21 @@
+@startuml
+
+title "GetRoleList"
+
+actor User as user
+
+participant "app.go" as app
+participant "roles.go" as controller
+participant "rolesHandler.go" as handler
+participant "Database" as db
+
+user    -> app : GET: /api/role
+app    -> controller : GetRoleList
+controller -> handler : GetRoleList
+handler -> db : return RoleList
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | RoleList
+
+@enduml

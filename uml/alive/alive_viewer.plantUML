@@ -1,0 +1,16 @@
+@startuml
+
+title "Alive Admin"
+
+actor User as user
+
+participant "app.go" as app
+participant "mcimw.go" as mcimw
+
+user    -> app : GET: /alive/viewer
+app     -> mcimw: BuffaloMcimw(), mcimw.GrantedRoleList = []string{"viewer"}
+mcimw -> mcimw: BuffaloMiddleware()
+mcimw -> app
+app -> user: return successMessage | json
+
+@enduml

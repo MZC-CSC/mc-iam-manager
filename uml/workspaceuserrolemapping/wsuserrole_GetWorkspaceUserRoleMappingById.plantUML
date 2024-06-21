@@ -1,0 +1,31 @@
+@startuml
+
+title "GetWorkspaceUserRoleMappingById"
+
+actor User as user
+
+participant "app.go" as app
+participant "workspace_user_role_mappings.go" as controller
+participant "workspace_user_role_mappingsHandler.go" as handler
+participant "roleHandler.go" as roleHandler
+participant "workspace_project_mappingsHandler.go" as wpHandler
+participant "Database" as db
+
+user    -> app : GET: /api/wsuserrole/workspace/id/{workspaceId}/user/id/{userId}
+app    -> controller : GetWorkspaceUserRoleMappingListByUserId()
+controller -> handler : GetWorkspaceUserRoleMappingListByUserId(userId)
+handler -> db : GetWorkspaceUserRoleMappingListByUserId
+db -> handler : return WorkspaceUserRoleMappings
+handler -> roleHandler : GetRoleById(roleId)
+roleHandler -> db :
+db -> roleHandler : return role
+roleHandler -> handler : return role
+handler -> wpHandler : GetWPmappingListByWorkspaceId(workspaceId)
+wpHandler -> db :
+db -> wpHandler : return WPmappingList
+wpHandler -> handler : return WPmappingList
+handler -> controller : WURmappingList
+controller -> app : WURmappingList
+user <- app : return successMessage | WURmappingList
+
+@enduml

@@ -1,0 +1,21 @@
+@startuml
+
+title "Update Role"
+
+actor User as user
+
+participant "app.go" as app
+participant "roles.go" as controller
+participant "rolesHandler.go" as handler
+participant "Database" as db
+
+user    -> app : PUT: /api/role/role/id/{roleId}
+app    -> controller : UpdateRole
+controller -> handler : UpdateRole
+handler -> db :
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | json message
+
+@enduml

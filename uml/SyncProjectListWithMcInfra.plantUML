@@ -1,0 +1,24 @@
+@startuml
+
+title "CreateWorkspaceUserRoleMappingByName"
+
+actor User as user
+
+participant "app.go" as app
+participant "mcinfra.go" as controller
+participant "mcinframanager.go" as handler
+participant "infra" as infra
+participant "projectHandler.go" as pjHandler
+
+user    -> app : GET: /api/tool/mcinfra/sync
+app    -> controller : SyncProjectListWithMcInfra()
+controller -> handler : McInfraListAllNamespaces()
+handler -> infra : call project List
+infra -> handler : return namespace List
+handler -> controller : return namespaceList
+controller -> db : create project
+db -> controller : return projectList
+controller -> app :
+user <- app : return successMessage | project List
+
+@enduml

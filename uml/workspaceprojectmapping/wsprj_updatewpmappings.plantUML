@@ -1,0 +1,25 @@
+@startuml
+
+title "UpdateWPmappings"
+
+actor User as user
+
+participant "app.go" as app
+participant "workspace_project_mappings.go" as controller
+participant "workspace_project_mappingsHandler.go" as handler
+participant "Database" as db
+
+user    -> app : PUT: /api/wspjr
+app    -> controller : UpdateWPmappings
+controller -> handler : UpdateWPmappings
+handler -> db : DeleteWPmapping
+db -> handler :
+handler -> db : CreateWPmapping
+db -> handler :
+handler -> db : GetWPmappingListByWorkspaceId
+db -> handler : return WPMapping
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | json message
+
+@enduml

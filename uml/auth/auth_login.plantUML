@@ -1,0 +1,18 @@
+@startuml
+
+title "Login"
+
+actor User as user
+
+participant "app.go" as app
+participant "mcimw.go" as mcimw
+participant "keycloak" as keycloak
+
+user    -> app : POST: /api/auth/login
+app    -> mcimw : BeginAuthHandler
+mcimw -> keycloak : AuthLoginHandler, login request(id, password)
+keycloak -> mcimw : return token
+mcimw -> app : return token
+user <- app : return successMessage | json, with access token
+
+@enduml

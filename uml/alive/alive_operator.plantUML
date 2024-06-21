@@ -1,0 +1,16 @@
+@startuml
+
+title "Alive Operator"
+
+actor User as user
+
+participant "app.go" as app
+participant "mcimw.go" as mcimw
+
+user    -> app : GET: /alive/operator
+app     -> mcimw: BuffaloMcimw(), mcimw.GrantedRoleList = []string{"operator"}
+mcimw -> mcimw: BuffaloMiddleware()
+mcimw -> app
+app -> user: return successMessage | json
+
+@enduml

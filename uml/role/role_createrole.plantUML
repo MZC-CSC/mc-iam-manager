@@ -1,0 +1,21 @@
+@startuml
+
+title "Create Role"
+
+actor User as user
+
+participant "app.go" as app
+participant "roles.go" as controller
+participant "rolesHandler.go" as handler
+participant "Database" as db
+
+user    -> app : POST: /api/role
+app    -> controller : CreateRole
+controller -> handler : CreateRole
+handler -> db :
+db -> handler :
+handler -> controller :
+controller -> app :
+user <- app : return successMessage | json message
+
+@enduml

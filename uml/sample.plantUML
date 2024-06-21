@@ -1,0 +1,33 @@
+@startuml
+
+title "Sample Sequence Diagram"
+
+actor User as EndUser
+
+participant Salesforce as SFDC
+participant "Integration Layer" as ESB
+participant "Payment Gateway" as payGateway
+participant "Order System" as order 
+
+group Step: Validate card
+    autonumber
+    EndUser -> SFDC : Enter the credit card number
+    SFDC -> payGateway ++: Get card type with 4 digit
+    SFDC <- payGateway : Return Type master/visa/etc
+    EndUser -> SFDC : Save Card Detail
+    SFDC -> payGateway : Post : Detail to get secure Token
+    SFDC <- payGateway : POST: Detail to get secure Token
+    SFDC -> SFDC : Save secure Token
+    else
+    EndUser <- payGateway : Invalid Card Detail
+end
+
+group : Submit order 
+    EndUser -> SFDC ++: Submit the order
+    SFDC -> payGateway : validate the payment 한글도 되나?
+    SFDC -> payGateway : app the 한글을 쓸 때에는 앞에 영문 두단어 추천
+    SFDC <- payGateway : send paymentId
+    SFDC -> order : Submit detail to other system '주석인가?
+
+end 
+@enduml
