@@ -60,6 +60,8 @@ func App() *buffalo.App {
 		sts := app.Group(apiPath + "poc" + "/sts")
 		mcimw.GrantedRoleList = []string{}
 		sts.GET("/securitykey", mcimw.BuffaloMcimw(AuthSecuritykeyProviderHandler))
+		sts.POST("/securitykey/aws", mcimw.BuffaloMcimw(AuthGetVmAWSHandler))
+		sts.POST("/securitykey/alibaba", mcimw.BuffaloMcimw(AuthGetVmAlibabaHandler))
 
 		mcimw.AuthMethod = mcimw.EnvKeycloak
 		mcimw.GrantedRoleList = []string{}
