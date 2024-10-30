@@ -40,3 +40,5 @@ scripts/init/permission.csv
 scripts/init/mcwebconsoleMenu.yaml
 scripts/init/api.yaml
 scripts/init/.env
+
+docs/cspIdp/
