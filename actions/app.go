@@ -2,168 +2,110 @@ package actions
 
 import (
 	"net/http"
-	"strconv"
-	"sync"
 
-	"github.com/m-cmp/mc-iam-manager/handler"
-	"github.com/m-cmp/mc-iam-manager/middleware"
-	"github.com/m-cmp/mc-iam-manager/models"
+	"gocloak/locales"
+	"gocloak/models"
+	"gocloak/public"
 
 	"github.com/gobuffalo/buffalo"
 	"github.com/gobuffalo/buffalo-pop/v3/pop/popmw"
-	contenttype "github.com/gobuffalo/mw-contenttype"
+	"github.com/gobuffalo/envy"
+	forcessl "github.com/gobuffalo/mw-forcessl"
 	i18n "github.com/gobuffalo/mw-i18n/v2"
 	paramlogger "github.com/gobuffalo/mw-paramlogger"
-	"github.com/gobuffalo/x/sessions"
-	"github.com/rs/cors"
+	"github.com/unrolled/secure"
 )
+
+// ENV is used to help switch settings based on where the
+// application is being run. Default is "development".
+var ENV = envy.Get("GO_ENV", "development")
 
 var (
-	app     *buffalo.App
-	appOnce sync.Once
-	T       *i18n.Translator
+	app *buffalo.App
+	T   *i18n.Translator
 )
 
+// App is where all routes and middleware for buffalo
+// should be defined. This is the nerve center of your
+// application.
+//
+// Routing, middleware, groups, etc... are declared TOP -> DOWN.
+// This means if you add a middleware to `app` *after* declaring a
+// group, that group will NOT have that new middleware. The same
+// is true of resource declarations as well.
+//
+// It also means that routes are checked in the order they are declared.
+// `ServeFiles` is a CATCH-ALL route, so it should always be
+// placed last in the route declarations, as it will prevent routes
+// declared after it to never be called.
 func App() *buffalo.App {
-	appOnce.Do(func() {
+	if app == nil {
 		app = buffalo.New(buffalo.Options{
-			SessionStore: sessions.Null{},
-			PreWares: []buffalo.PreWare{
-				cors.Default().Handler,
-			},
-			SessionName: "_github.com/m-cmp/mc-iam-manager_session",
+			Env:         ENV,
+			SessionName: "_gocloak_session",
 		})
 
+		// Automatically redirect to SSL
+		app.Use(forceSSL())
+
+		// Log request parameters (filters apply).
 		app.Use(paramlogger.ParameterLogger)
-		app.Use(contenttype.Set("application/json"))
+
+		// Protect against CSRF attacks. https://www.owasp.org/index.php/Cross-Site_Request_Forgery_(CSRF)
+		// Remove to disable this.
+		// app.Use(csrf.New)
+
+		// Wraps each request in a transaction.
+		//   c.Value("tx").(*pop.Connection)
+		// Remove to disable this.
 		app.Use(popmw.Transaction(models.DB))
+		// Setup and use translations:
+		app.Use(translations())
 
-		app.Use(middleware.IsAuthMiddleware)
-		app.Use(middleware.SetContextMiddleware)
+		// kc := app.Group("/mcloak")
+		// kc.GET("/home", KcHomeHandler) // /mcloak/home
+		// kc.GET("/login", KcLoginHandler)
+		// kc.GET("/createuser", KcCreateUserHandler)
 
-		// Resources Permission MODE
-		if yn, _ := strconv.ParseBool(handler.USE_TICKET_VALID); yn {
-			app.Use(middleware.IsTicketValidMiddleware)
-		}
+		bf := app.Group("/buffalo")
+		bf.Use(IsAuth)
+		bf.Middleware.Skip(IsAuth, LoginHandler, NotAuthUserTestPageHandler)
+		bf.GET("/login", LoginHandler)
+		bf.POST("/login", LoginHandler)
+		bf.GET("/authuser/not", NotAuthUserTestPageHandler)
 
-		//Readyz skip all middleware
-		app.Middleware.Skip(middleware.IsAuthMiddleware, readyz)
-		app.Middleware.Skip(middleware.SetContextMiddleware, readyz)
-		app.Middleware.Skip(middleware.IsTicketValidMiddleware, readyz)
-		app.ANY("/readyz", readyz)
+		bf.GET("/", HomeHandler)
+		bf.GET("/authuser", AuthUserTestPageHandler)
 
-		apiPath := "/api"
+		app.GET("/saml/aws", AwsSamlSTSKey)
+		app.GET("/saml/ali", AliSamlSTSKey)
 
-		authPath := app.Group(apiPath + "/auth")
-		authPath.Middleware.Skip(middleware.IsAuthMiddleware, AuthLoginHandler, AuthLoginRefreshHandler, AuthLogoutHandler, AuthGetCerts)
-		authPath.Middleware.Skip(middleware.SetContextMiddleware, AuthLoginHandler, AuthLoginRefreshHandler, AuthLogoutHandler, AuthGetCerts)
-		authPath.Middleware.Skip(middleware.IsTicketValidMiddleware, AuthLoginHandler, AuthLoginRefreshHandler, AuthLogoutHandler, AuthGetCerts, AuthGetTokenInfo, AuthGetUserValidate)
-		authPath.POST("/login", AuthLoginHandler)
-		authPath.POST("/login/refresh", AuthLoginRefreshHandler)
-		authPath.POST("/logout", AuthLogoutHandler)
-		authPath.GET("/userinfo", AuthGetUserInfo)
-		authPath.GET("/tokeninfo", AuthGetTokenInfo)
-		authPath.GET("/validate", AuthGetUserValidate)
-		authPath.GET("/certs", AuthGetCerts)
-
-		ticketPath := app.Group(apiPath + "/ticket")
-		ticketPath.Middleware.Skip(middleware.IsTicketValidMiddleware, GetPermissionTicket, GetAllPermissions, GetAllAvailableMenus)
-		ticketPath.POST("/", GetPermissionTicket)
-		ticketPath.GET("/", GetAllPermissions)
-		ticketPath.GET("/framework/{framework}/menus", GetAllAvailableMenus)
-
-		userPath := app.Group(apiPath + "/user")
-		// userPath.Middleware.Skip(middleware.IsAuthMiddleware, CreateUser)
-		// userPath.Middleware.Skip(middleware.SetContextMiddleware, CreateUser)
-		// userPath.Middleware.Skip(middleware.IsTicketValidMiddleware, CreateUser)
-		userPath.POST("/", CreateUser)
-		userPath.POST("/active", ActiveUser)
-		userPath.POST("/deactive", DeactiveUser)
-		userPath.GET("/", GetUsers)
-		userPath.PUT("/id/{userId}", UpdateUser)
-		userPath.DELETE("/id/{userId}", DeleteUser)
-
-		rolePath := app.Group(apiPath + "/role")
-		rolePath.POST("/", CreateRole)
-		rolePath.GET("/", GetRoleList)
-		rolePath.GET("/name/{roleName}", SearchRolesByName)
-		rolePath.GET("/id/{roleId}", GetRoleById)
-		rolePath.GET("/policyid/{policyId}", GetRoleByPolicyId)
-		rolePath.PUT("/id/{roleId}", UpdateRoleById)
-		rolePath.DELETE("/id/{roleId}", DeleteRoleById)
-
-		workspacePath := app.Group(apiPath + "/ws")
-		workspacePath.POST("/", CreateWorkspace)
-		workspacePath.GET("/", GetWorkspaceList)
-		workspacePath.GET("/workspace/{workspaceName}", SearchWorkspacesByName)
-		workspacePath.GET("/workspace/id/{workspaceId}", GetWorkspaceById)
-		workspacePath.PUT("/workspace/id/{workspaceId}", UpdateWorkspaceById)
-		workspacePath.DELETE("/workspace/id/{workspaceId}", DeleteWorkspaceById)
-
-		projectPath := app.Group(apiPath + "/prj")
-		projectPath.POST("/", CreateProject)
-		projectPath.GET("/", GetProjectList)
-		projectPath.GET("/project/{projectName}", SearchProjectsByName)
-		projectPath.GET("/project/id/{projectId}", GetProjectById)
-		projectPath.PUT("/project/id/{projectId}", UpdateProjectById)
-		projectPath.DELETE("/project/id/{projectId}", DeleteProjectById)
-
-		wpmappingPath := app.Group(apiPath + "/wsprj")
-		wpmappingPath.POST("/", CreateWPmappings)
-		wpmappingPath.GET("/", GetWPmappingListOrderbyWorkspace)
-		wpmappingPath.GET("/workspace/id/{workspaceId}", GetWPmappingListByWorkspaceId)
-		wpmappingPath.PUT("/", UpdateWPmappings)
-		wpmappingPath.DELETE("/workspace/id/{workspaceId}/project/id/{projectId}", DeleteWPmapping)
-
-		workspaceUserRoleMappingPath := app.Group(apiPath + "/wsuserrole")
-		workspaceUserRoleMappingPath.POST("/", CreateWorkspaceUserRoleMapping)
-		workspaceUserRoleMappingPath.GET("/", GetWorkspaceUserRoleMappingListOrderbyWorkspace)
-		workspaceUserRoleMappingPath.GET("/workspace/id/{workspaceId}", GetWorkspaceUserRoleMappingListByWorkspaceId)
-		workspaceUserRoleMappingPath.GET("/user/id/{userId}", GetWorkspaceUserRoleMappingListByUserId)
-		workspaceUserRoleMappingPath.GET("/workspace/id/{workspaceId}/user/id/{userId}", GetWorkspaceUserRoleMappingById)
-		workspaceUserRoleMappingPath.DELETE("/workspace/id/{workspaceId}/user/id/{userId}", DeleteWorkspaceUserRoleMapping)
-
-		resourcePath := app.Group(apiPath + "/resource")
-		resourcePath.POST("/", CreateResources)
-		resourcePath.Middleware.Skip(middleware.IsTicketValidMiddleware, CreateApiResourcesByApiYaml, CreateWebResourceResourcesByMenuYaml)
-		// resourcePath.POST("/file", CreateApiResourcesByApiYaml)
-		resourcePath.POST("/file/framework/{framework}", CreateApiResourcesByApiYaml)
-		resourcePath.POST("/file/framework/{framework}/menu", CreateWebResourceResourcesByMenuYaml)
-		// resourcePath.POST("/file/framework/{framework}", CreateResourcesBySwagger) // deprecated : use CreateResourcesByApiYaml
-		resourcePath.GET("/", GetResources)
-		resourcePath.GET("/menus", GetMenuResources)
-		resourcePath.PUT("/id/{resourceid}", UpdateResource)
-		resourcePath.DELETE("/id/{resourceid}", DeleteResource)
-		resourcePath.DELETE("/reset", ResetResource)
-		resourcePath.DELETE("/reset/menu", ResetMenuResource)
-
-		permissionPath := app.Group(apiPath + "/permission")
-		// permissionPath.POST("/", CreatePermission)  // deprecated : permission is resource dependent
-		permissionPath.GET("/", GetPermissions)
-		permissionPath.GET("/policyid/{policyId}", GetdependentPermissionsByPolicyId)
-		permissionPath.GET("/framewrok/{framework}/operationid/{operationid}", GetPermission)
-		// permissionPath.GET("/id/{permissionid}", GetPermission) // deprecated : permission is resource dependent
-		// permissionPath.PUT("/id/{permissionid}", UpdatePermission)// deprecated : permission is resource dependent
-		permissionPath.PUT("/framewrok/{framework}/operationid/{operationid}", UpdateResourcePermissionByOperationId)                  // menu could use thie operation by menu Id
-		permissionPath.PUT("/framewrok/{framework}/operationid/{operationid}/append", AppendResourcePermissionPolicesByOperationId)    // menu could use thie operation by menu Id
-		permissionPath.DELETE("/framewrok/{framework}/operationid/{operationid}/remove", DeleteResourcePermissionPolicesByOperationId) // menu could use thie operation by menu Id
-		// permissionPath.PUT("/framewrok/{framework}/menu/{menu}", UpdateResourcePermissionByMenu)
-		// permissionPath.DELETE("/id/{permissionid}", DeletePermission) // deprecated : permission is resource dependent, When a resource is deleted, the permissions are also deleted.
-		permissionPath.Middleware.Skip(middleware.IsTicketValidMiddleware, GetCurrentPermissionCsv, ImportPermissionByCsv)
-		permissionPath.GET("/file/framework/{framework}", GetCurrentPermissionCsv)
-		permissionPath.POST("/file/framework/{framework}", ImportPermissionByCsv)
-
-		toolPath := app.Group(apiPath + "/tool")
-		toolPath.GET("/mcinfra/sync", SyncProjectListWithMcInfra)
-		toolPath.GET("/keycloak/role/sync", SyncRoleListWithKeycloak)
-
-		stsPath := app.Group(apiPath + "/poc" + "/sts")
-		stsPath.GET("/securitykey", AuthSecuritykeyProviderHandler)
-	})
+		app.ServeFiles("/", http.FS(public.FS())) // serve files from the public directory
+	}
 
 	return app
 }
 
-func readyz(c buffalo.Context) error {
-	return c.Render(http.StatusOK, r.JSON(map[string]string{"status": "ok"}))
+// translations will load locale files, set up the translator `actions.T`,
+// and will return a middleware to use to load the correct locale for each
+// request.
+// for more information: https://gobuffalo.io/en/docs/localization
+func translations() buffalo.MiddlewareFunc {
+	var err error
+	if T, err = i18n.New(locales.FS(), "en-US"); err != nil {
+		app.Stop(err)
+	}
+	return T.Middleware()
+}
+
+// forceSSL will return a middleware that will redirect an incoming request
+// if it is not HTTPS. "http://example.com" => "https://example.com".
+// This middleware does **not** enable SSL. for your application. To do that
+// we recommend using a proxy: https://gobuffalo.io/en/docs/proxy
+// for more information: https://github.com/unrolled/secure/
+func forceSSL() buffalo.MiddlewareFunc {
+	return forcessl.Middleware(secure.Options{
+		SSLRedirect:     ENV == "production",
+		SSLProxyHeaders: map[string]string{"X-Forwarded-Proto": "https"},
+	})
 }
