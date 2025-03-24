@@ -31,9 +31,11 @@ show_menu() {
     echo -n "select Number : "
 }
 
-MCIAMHOST=https://$DOMAIN:5000
+#MCIAMHOST=https://$DOMAIN:5000
+MCIAMHOST=http://localhost:4000
 
 read_option() {
+    echo $MCIAMHOST
     local choice
     read choice
     case $choice in

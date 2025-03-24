@@ -1,0 +1,1 @@
+CREATE DATABASE mc_iam_manager

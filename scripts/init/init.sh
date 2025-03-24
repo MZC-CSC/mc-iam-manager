@@ -3,16 +3,22 @@ source ./.env
 
 login(){
     read -p "Enter the platforadmin ID: " MCIAMMANAGER_PLATFORMADMIN_ID
-    read -s -p "Enter the platforadmin password: " MCIAMMANAGER_PLATFORMADMIN_PASSWORD
+    #read -s -p "Enter the platforadmin password: " MCIAMMANAGER_PLATFORMADMIN_PASSWORD
+    read -p "Enter the platforadmin password: " MCIAMMANAGER_PLATFORMADMIN_PASSWORD
+    
     response=$(curl --location --silent --header 'Content-Type: application/json' --data '{
         "id":"'"$MCIAMMANAGER_PLATFORMADMIN_ID"'",
         "password":"'"$MCIAMMANAGER_PLATFORMADMIN_PASSWORD"'"
     }' "$MCIAMMANAGER_HOST/api/auth/login")
+    echo + $MCIAMMANAGER_HOST $response
     MCIAMMANAGER_PLATFORMADMIN_ACCESSTOKEN="$(echo "$response" | jq -r '.access_token')"
-    echo $MCIAMMANAGER_PLATFORMADMIN_ACCESSTOKEN
+    echo + $MCIAMMANAGER_PLATFORMADMIN_ACCESSTOKEN
 }
 
 initResourceDatafromApiYaml(){
+    echo + $MCADMINCLI_APIYAML
+    echo + $MCIAMMANAGER_HOST
+    echo + $MCIAMMANAGER_PLATFORMADMIN_ACCESSTOKEN
     wget -q -O ./api.yaml $MCADMINCLI_APIYAML
     curl --location "$MCIAMMANAGER_HOST/api/resource/file/framework/all" \
     --header "Authorization: Bearer $MCIAMMANAGER_PLATFORMADMIN_ACCESSTOKEN" \
@@ -20,6 +26,8 @@ initResourceDatafromApiYaml(){
 }
 
 initMenuDatafromMenuYaml(){
+    echo + $MCIAMMANAGER_HOST
+    echo + $MCWEBCONSOLE_MENUYAML
     wget -q -O ./mcwebconsoleMenu.yaml $MCWEBCONSOLE_MENUYAML
     curl --location "$MCIAMMANAGER_HOST/api/resource/file/framework/mc-web-console/menu" \
     --header "Authorization: Bearer $MCIAMMANAGER_PLATFORMADMIN_ACCESSTOKEN" \
@@ -27,12 +35,17 @@ initMenuDatafromMenuYaml(){
 }
 
 initRoleData(){
+    echo + $MCIAMMANAGER_HOST
+    echo + $PREDEFINED_ROLE
     IFS=',' read -r -a roles <<< "$PREDEFINED_ROLE"
     for role in "${roles[@]}"
     do
         echo "Creating role: $role"
         json_data=$(jq -n --arg name "$role" --arg description "$role Role" \
         '{name: $name, description: $description}')
+
+        echo "json_data: $json_data"
+
         curl -s -X POST \
         --header 'Content-Type: application/json' \
         --header "Authorization: Bearer $MCIAMMANAGER_PLATFORMADMIN_ACCESSTOKEN" \

@@ -1,0 +1,18 @@
+networks:
+  mc-iam-manager-network:
+
+services:
+  mc-iam-manager:
+    container_name: mc-iam-manager
+    build:
+      context: ./
+      dockerfile: ./dockerconf/mc-iam-manager/Dockerfile.mciammanager
+    ports:
+      - target: 5000
+        published: 5000
+        protocol: tcp
+    environment:
+      DATABASE_URL: postgres://${IAM_POSTGRES_USER}:${IAM_POSTGRES_PASSWORD}@mc-iam-manager-db:5432/${IAM_POSTGRES_DB}
+      PORT: 5000
+    env_file:
+      - .env
