@@ -1,2 +1,0 @@
-drop_table("context_prefix_a_table")
-drop_table("context_prefix_b_table")
