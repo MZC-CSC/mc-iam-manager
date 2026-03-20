@@ -1,12 +1,30 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	awscredentials "github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/m-cmp/mc-iam-manager/model"
 	"github.com/m-cmp/mc-iam-manager/repository"
+	"google.golang.org/api/cloudresourcemanager/v1"
+	"google.golang.org/api/option"
 	"gorm.io/gorm"
+)
+
+var (
+	ErrCspAccountNotFound     = errors.New("CSP account not found")
+	ErrCspAccountNotActivated = errors.New("CSP account is not activated")
+	ErrCloudAPIFailed         = errors.New("Cloud API call failed")
+	ErrMissingCredential      = errors.New("Missing credential")
+	ErrNoActiveIdpConfig      = errors.New("no active IDP config found for account")
 )
 
 // CspAccountService CSP 계정 서비스
@@ -254,4 +272,116 @@ func (s *CspAccountService) DeactivateCspAccount(id uint) error {
 
 	log.Printf("Deactivated CSP account: %s (ID: %d)", account.Name, account.ID)
 	return nil
+}
+
+// GetCloudAccountInfo CSP 클라우드 계정 실시간 정보 조회
+func (s *CspAccountService) GetCloudAccountInfo(id uint) (*model.CspCloudInfoResponse, error) {
+	account, err := s.cspAccountRepo.GetByID(id)
+	if err != nil || account == nil {
+		return nil, fmt.Errorf("%w with ID: %d", ErrCspAccountNotFound, id)
+	}
+
+	if !account.IsActive {
+		return nil, ErrCspAccountNotActivated
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var cloudInfo map[string]string
+	switch account.CspType {
+	case "aws":
+		cloudInfo, err = s.fetchAWSCloudInfo(ctx, account.AccountInfo)
+	case "gcp":
+		idpConfigs, idpErr := s.cspIdpConfigRepo.GetActiveByAccountID(account.ID)
+		if idpErr != nil || len(idpConfigs) == 0 {
+			return nil, fmt.Errorf("%w: %d", ErrNoActiveIdpConfig, id)
+		}
+		cloudInfo, err = s.fetchGCPCloudInfo(ctx, account.GetProjectID(), idpConfigs[0].Config)
+	case "azure":
+		cloudInfo, err = s.fetchAzureCloudInfo(ctx, account.AccountInfo)
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCspType, account.CspType)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCloudAPIFailed, err)
+	}
+
+	return &model.CspCloudInfoResponse{
+		AccountId: account.ID,
+		CspType:   account.CspType,
+		CloudInfo: cloudInfo,
+	}, nil
+}
+
+// fetchAWSCloudInfo AWS STS GetCallerIdentity 호출
+func (s *CspAccountService) fetchAWSCloudInfo(ctx context.Context, creds map[string]string) (map[string]string, error) {
+	accessKeyID, ok1 := creds["access_key_id"]
+	secretKey, ok2 := creds["secret_access_key"]
+	if !ok1 || !ok2 {
+		return nil, fmt.Errorf("%w: access_key_id or secret_access_key", ErrMissingCredential)
+	}
+	region := creds["region"]
+	if region == "" {
+		region = "us-east-1"
+	}
+
+	cfg, err := awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithRegion(region),
+		awsconfig.WithCredentialsProvider(
+			awscredentials.NewStaticCredentialsProvider(accessKeyID, secretKey, ""),
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	stsClient := sts.NewFromConfig(cfg)
+	out, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{
+		"account_id": aws.ToString(out.Account),
+		"arn":        aws.ToString(out.Arn),
+		"user_id":    aws.ToString(out.UserId),
+	}, nil
+}
+
+// fetchGCPCloudInfo GCP CloudResourceManager projects.get 호출
+// projectID: CspAccount.AccountInfo["project_id"]
+// creds: CspIdpConfig.Config (service_account_key_json 포함)
+func (s *CspAccountService) fetchGCPCloudInfo(ctx context.Context, projectID string, creds map[string]string) (map[string]string, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("%w: project_id", ErrMissingCredential)
+	}
+	saKeyJSON, ok := creds["service_account_key_json"]
+	if !ok || saKeyJSON == "" {
+		return nil, fmt.Errorf("%w: service_account_key_json", ErrMissingCredential)
+	}
+
+	svc, err := cloudresourcemanager.NewService(ctx,
+		option.WithCredentialsJSON([]byte(saKeyJSON)),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	proj, err := svc.Projects.Get(projectID).Context(ctx).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{
+		"project_id":     proj.ProjectId,
+		"name":           proj.Name,
+		"project_number": strconv.FormatInt(proj.ProjectNumber, 10),
+	}, nil
+}
+
+// fetchAzureCloudInfo Azure Subscriptions 조회
+func (s *CspAccountService) fetchAzureCloudInfo(ctx context.Context, creds map[string]string) (map[string]string, error) {
+	// TODO: Azure SDK 의존성 추가 후 구현 (azidentity, armsubscriptions)
+	return nil, fmt.Errorf("Azure cloud info not yet implemented")
 }

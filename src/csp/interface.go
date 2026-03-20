@@ -70,6 +70,7 @@ type IAMClient interface {
 type IAMClientConfig struct {
 	Region           string
 	CredentialsFile  string
+	CredentialsJSON  []byte // GCP: service account key JSON (우선), CredentialsFile fallback
 	Profile          string
 	Timeout          time.Duration
 	RoleARN          string

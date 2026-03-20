@@ -17,11 +17,18 @@ type GCPIAMClient struct {
 }
 
 // NewGCPIAMClient 새로운 GCP IAM 클라이언트 생성
+// CredentialsJSON이 있으면 우선 사용, 없으면 CredentialsFile fallback
 func NewGCPIAMClient(cfg *csp.IAMClientConfig) (*GCPIAMClient, error) {
 	ctx := context.Background()
 
-	// GCP IAM 클라이언트 생성
-	client, err := admin.NewIamClient(ctx, option.WithCredentialsFile(cfg.CredentialsFile))
+	var clientOpt option.ClientOption
+	if len(cfg.CredentialsJSON) > 0 {
+		clientOpt = option.WithCredentialsJSON(cfg.CredentialsJSON)
+	} else {
+		clientOpt = option.WithCredentialsFile(cfg.CredentialsFile)
+	}
+
+	client, err := admin.NewIamClient(ctx, clientOpt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create IAM client: %w", err)
 	}

@@ -209,6 +209,14 @@ func (c *CspIdpConfig) GetFederatedCredentialId() string {
 	return c.Config["federated_credential_id"]
 }
 
+// GetServiceAccountKeyJSON GCP Service Account Key JSON 반환
+func (c *CspIdpConfig) GetServiceAccountKeyJSON() string {
+	if c.Config == nil {
+		return ""
+	}
+	return c.Config["service_account_key_json"]
+}
+
 // GetAccessKeyID Secret Key Access Key ID 반환
 func (c *CspIdpConfig) GetAccessKeyID() string {
 	if c.Config == nil {
