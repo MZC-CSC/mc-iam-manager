@@ -279,3 +279,98 @@ func (h *CspIdpConfigHandler) DeactivateCspIdpConfig(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "IDP config deactivated successfully"})
 }
+
+// SyncCspIdpToCloud godoc
+// @Summary Sync CSP IDP config to cloud
+// @Description Create or update the actual IDP provider (OIDC/SAML) in the cloud using this config
+// @Tags csp-idp-configs
+// @Accept json
+// @Produce json
+// @Param configId path string true "Config ID"
+// @Success 200 {object} service.CloudIdpStatus
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Security BearerAuth
+// @Router /api/csp-idp-configs/id/{configId}/sync [post]
+// @Id syncCspIdpToCloud
+func (h *CspIdpConfigHandler) SyncCspIdpToCloud(c echo.Context) error {
+	configID, err := util.StringToUint(c.Param("configId"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid config ID"})
+	}
+
+	status, err := h.cspIdpConfigService.SyncIdpToCloud(c.Request().Context(), configID)
+	if err != nil {
+		code := http.StatusInternalServerError
+		if err.Error() == fmt.Sprintf("IDP config not found with ID: %d", configID) {
+			code = http.StatusNotFound
+		}
+		return c.JSON(code, map[string]string{"error": fmt.Sprintf("Failed to sync IDP to cloud: %v", err)})
+	}
+
+	return c.JSON(http.StatusOK, status)
+}
+
+// GetCloudIdpStatus godoc
+// @Summary Get cloud IDP provider status
+// @Description Retrieve the actual IDP provider status from the cloud
+// @Tags csp-idp-configs
+// @Accept json
+// @Produce json
+// @Param configId path string true "Config ID"
+// @Success 200 {object} service.CloudIdpStatus
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Security BearerAuth
+// @Router /api/csp-idp-configs/id/{configId}/cloud-status [get]
+// @Id getCloudIdpStatus
+func (h *CspIdpConfigHandler) GetCloudIdpStatus(c echo.Context) error {
+	configID, err := util.StringToUint(c.Param("configId"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid config ID"})
+	}
+
+	status, err := h.cspIdpConfigService.GetCloudIdpStatus(c.Request().Context(), configID)
+	if err != nil {
+		code := http.StatusInternalServerError
+		if err.Error() == fmt.Sprintf("IDP config not found with ID: %d", configID) {
+			code = http.StatusNotFound
+		}
+		return c.JSON(code, map[string]string{"error": fmt.Sprintf("Failed to get cloud IDP status: %v", err)})
+	}
+
+	return c.JSON(http.StatusOK, status)
+}
+
+// DeleteCloudIdpProvider godoc
+// @Summary Delete cloud IDP provider
+// @Description Delete the actual IDP provider from the cloud (does not delete the local config)
+// @Tags csp-idp-configs
+// @Accept json
+// @Produce json
+// @Param configId path string true "Config ID"
+// @Success 204 "No Content"
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Security BearerAuth
+// @Router /api/csp-idp-configs/id/{configId}/cloud-provider [delete]
+// @Id deleteCloudIdpProvider
+func (h *CspIdpConfigHandler) DeleteCloudIdpProvider(c echo.Context) error {
+	configID, err := util.StringToUint(c.Param("configId"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid config ID"})
+	}
+
+	if err := h.cspIdpConfigService.DeleteCloudIdpProvider(c.Request().Context(), configID); err != nil {
+		code := http.StatusInternalServerError
+		if err.Error() == fmt.Sprintf("IDP config not found with ID: %d", configID) {
+			code = http.StatusNotFound
+		}
+		return c.JSON(code, map[string]string{"error": fmt.Sprintf("Failed to delete cloud IDP provider: %v", err)})
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}

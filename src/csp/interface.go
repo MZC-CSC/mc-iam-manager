@@ -182,3 +182,68 @@ type PolicyManager interface {
 	// GetCspType CSP 타입 반환
 	GetCspType() string
 }
+
+// OIDCProviderInfo OIDC Provider 정보
+type OIDCProviderInfo struct {
+	Arn            string            `json:"arn"`
+	Url            string            `json:"url"`
+	ClientIDList   []string          `json:"client_id_list"`
+	ThumbprintList []string          `json:"thumbprint_list"`
+	CreateDate     time.Time         `json:"create_date"`
+}
+
+// OIDCProviderRequest OIDC Provider 생성 요청
+type OIDCProviderRequest struct {
+	Url            string            `json:"url"`
+	ClientIDList   []string          `json:"client_id_list"`
+	ThumbprintList []string          `json:"thumbprint_list"`
+	Tags           map[string]string `json:"tags,omitempty"`
+}
+
+// SAMLProviderInfo SAML Provider 정보
+type SAMLProviderInfo struct {
+	Arn        string    `json:"arn"`
+	Name       string    `json:"name"`
+	CreateDate time.Time `json:"create_date"`
+	ValidUntil time.Time `json:"valid_until"`
+}
+
+// SAMLProviderRequest SAML Provider 생성 요청
+type SAMLProviderRequest struct {
+	Name                 string            `json:"name"`
+	SAMLMetadataDocument string            `json:"saml_metadata_document"`
+	Tags                 map[string]string `json:"tags,omitempty"`
+}
+
+// IDPManager CSP IDP Provider 관리 인터페이스
+type IDPManager interface {
+	// CreateOIDCProvider OIDC Provider 생성, ARN 반환
+	CreateOIDCProvider(ctx context.Context, req *OIDCProviderRequest) (string, error)
+
+	// GetOIDCProvider OIDC Provider 조회
+	GetOIDCProvider(ctx context.Context, arn string) (*OIDCProviderInfo, error)
+
+	// DeleteOIDCProvider OIDC Provider 삭제
+	DeleteOIDCProvider(ctx context.Context, arn string) error
+
+	// ListOIDCProviders OIDC Provider 목록 조회
+	ListOIDCProviders(ctx context.Context) ([]*OIDCProviderInfo, error)
+
+	// CreateSAMLProvider SAML Provider 생성, ARN 반환
+	CreateSAMLProvider(ctx context.Context, req *SAMLProviderRequest) (string, error)
+
+	// GetSAMLProvider SAML Provider 조회
+	GetSAMLProvider(ctx context.Context, arn string) (*SAMLProviderInfo, error)
+
+	// UpdateSAMLProvider SAML Provider 메타데이터 업데이트, ARN 반환
+	UpdateSAMLProvider(ctx context.Context, arn string, samlMetadataDocument string) (string, error)
+
+	// DeleteSAMLProvider SAML Provider 삭제
+	DeleteSAMLProvider(ctx context.Context, arn string) error
+
+	// ListSAMLProviders SAML Provider 목록 조회
+	ListSAMLProviders(ctx context.Context) ([]*SAMLProviderInfo, error)
+
+	// GetCspType CSP 타입 반환
+	GetCspType() string
+}

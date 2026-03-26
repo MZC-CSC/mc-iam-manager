@@ -440,6 +440,9 @@ func main() {
 		cspIdpConfigs.POST("/id/:configId/test", cspIdpConfigHandler.TestCspIdpConnection, middleware.PlatformAdminMiddleware)
 		cspIdpConfigs.POST("/id/:configId/activate", cspIdpConfigHandler.ActivateCspIdpConfig, middleware.PlatformAdminMiddleware)
 		cspIdpConfigs.POST("/id/:configId/deactivate", cspIdpConfigHandler.DeactivateCspIdpConfig, middleware.PlatformAdminMiddleware)
+		cspIdpConfigs.POST("/id/:configId/sync", cspIdpConfigHandler.SyncCspIdpToCloud, middleware.PlatformAdminMiddleware)
+		cspIdpConfigs.GET("/id/:configId/cloud-status", cspIdpConfigHandler.GetCloudIdpStatus)
+		cspIdpConfigs.DELETE("/id/:configId/cloud-provider", cspIdpConfigHandler.DeleteCloudIdpProvider, middleware.PlatformAdminMiddleware)
 	}
 
 	// 조직 관리 라우트 (platformAdmin 전용)
