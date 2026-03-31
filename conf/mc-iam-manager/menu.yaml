@@ -140,15 +140,15 @@ menus:
     parentid: cloudresources
     displayname: Networks
     restype: menu
-    isaction: false
+    isaction: true
     priority: 2
     menunumber: 1510
 
-  - id: securitys
+  - id: securitygroups
     parentid: cloudresources
-    displayname: Securitys
+    displayname: Security Groups
     restype: menu
-    isaction: false
+    isaction: true
     priority: 2
     menunumber: 1520
 
@@ -160,11 +160,11 @@ menus:
     priority: 2
     menunumber: 1530
 
-  - id: disks
+  - id: datadisk
     parentid: cloudresources
-    displayname: Disks
+    displayname: Data Disks
     restype: menu
-    isaction: false
+    isaction: true
     priority: 2
     menunumber: 1540
 
@@ -172,7 +172,7 @@ menus:
     parentid: cloudresources
     displayname: SSH Keys
     restype: menu
-    isaction: false
+    isaction: true
     priority: 2
     menunumber: 1550
 
