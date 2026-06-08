@@ -89,9 +89,6 @@ EXPECTED_CONTAINERS=(
     "mc-iam-manager-kc"
     "mc-iam-manager-nginx"
     # "mc-iam-manager-post-initial"  # Container that exits after execution
-    "mc-web-console-db"
-    "mc-web-console-api"
-    "mc-web-console-front"
 )
 
 # Containers without Health Check (treated as successful when in Up state)
