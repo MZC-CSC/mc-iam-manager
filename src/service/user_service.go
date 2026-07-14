@@ -160,8 +160,10 @@ func (s *UserService) CreateUser(ctx context.Context, user *model.User) error {
 	user.KcId = kcId
 	_, err = s.userRepo.Create(user)
 	if err != nil {
-		log.Printf("CRITICAL: Failed to create user in DB after Keycloak creation (kcId: %s). Manual cleanup needed. Error: %v", kcId, err)
-		// TODO: Compensation - delete user from Keycloak?
+		log.Printf("CRITICAL: Failed to create user in DB after Keycloak creation (kcId: %s). Rolling back KC user. Error: %v", kcId, err)
+		if rollbackErr := ks.DeleteUser(ctx, kcId); rollbackErr != nil {
+			log.Printf("CRITICAL: KC rollback also failed (kcId: %s): %v", kcId, rollbackErr)
+		}
 		return fmt.Errorf("failed to create user in DB after Keycloak: %w", err)
 	}
 	return nil
@@ -338,12 +340,12 @@ func (s *UserService) GetUserByID(ctx context.Context, id uint) (*model.User, er
 		// If user not found in Keycloak, maybe return DB data but log inconsistency?
 		return dbUser, nil
 	}
-	dbUser.Email = *kcUser.Email
-	dbUser.FirstName = *kcUser.FirstName
-	dbUser.LastName = *kcUser.LastName
-	dbUser.Enabled = *kcUser.Enabled
-	if dbUser.Username != *kcUser.Username {
-		log.Printf("Warning: Username mismatch for user ID %d (DB: %s, KC: %s)", id, dbUser.Username, *kcUser.Username)
+	dbUser.Email = ptrStr(kcUser.Email)
+	dbUser.FirstName = ptrStr(kcUser.FirstName)
+	dbUser.LastName = ptrStr(kcUser.LastName)
+	dbUser.Enabled = ptrBool(kcUser.Enabled)
+	if dbUser.Username != ptrStr(kcUser.Username) {
+		log.Printf("Warning: Username mismatch for user ID %d (DB: %s, KC: %s)", id, dbUser.Username, ptrStr(kcUser.Username))
 	}
 	return dbUser, nil
 }
@@ -457,6 +459,11 @@ func (s *UserService) DeleteUser(ctx context.Context, id uint) error {
 		}
 	} else {
 		log.Printf("Warning: User with DB ID %d has no KcId. Skipping Keycloak deletion.", id)
+	}
+
+	if err = s.userRepo.DeleteAllRoleMappings(id); err != nil {
+		log.Printf("CRITICAL: Failed to delete role mappings for user (ID: %d). Manual cleanup needed. Error: %v", id, err)
+		return fmt.Errorf("failed to delete role mappings for user (id: %d): %w", id, err)
 	}
 
 	err = s.userRepo.Delete(id)
