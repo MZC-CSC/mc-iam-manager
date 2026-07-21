@@ -33,11 +33,11 @@ func (m *mockValMappingRepo) FindCspRoleMappingsByRoleIDAndCspType(roleID uint, 
 }
 
 type mockValKcService struct {
-	mockKeycloakService          // 기본 stub 재사용
-	oidcToken       *gocloak.JWT
-	oidcErr         error
-	samlAssertion   string
-	samlErr         error
+	mockKeycloakService // 기본 stub 재사용
+	oidcToken           *gocloak.JWT
+	oidcErr             error
+	samlAssertion       string
+	samlErr             error
 }
 
 func (m *mockValKcService) GetImpersonationTokenByServiceAccount(ctx context.Context) (*gocloak.JWT, error) {
@@ -55,6 +55,11 @@ type mockValAwsService struct {
 	oidcErr    error
 	samlResult *model.CspCredentialResponse
 	samlErr    error
+
+	oidcProviderErr   error
+	samlProviderErr   error
+	roleTrustErr      error
+	callerIdentityErr error
 }
 
 func (m *mockValAwsService) AssumeRoleWithWebIdentity(_ context.Context, roleArn, kcUserId, token, idpArn, region string) (*model.CspCredentialResponse, error) {
@@ -64,15 +69,27 @@ func (m *mockValAwsService) AssumeRoleWithSAML(_ context.Context, roleArn, princ
 	return m.samlResult, m.samlErr
 }
 func (m *mockValAwsService) CheckOIDCProvider(_ context.Context, oidcProviderArn string) (string, error) {
+	if m.oidcProviderErr != nil {
+		return "", m.oidcProviderErr
+	}
 	return "", nil
 }
 func (m *mockValAwsService) CheckSAMLProvider(_ context.Context, samlProviderArn string) (string, error) {
+	if m.samlProviderErr != nil {
+		return "", m.samlProviderErr
+	}
 	return "", nil
 }
 func (m *mockValAwsService) CheckRoleTrust(_ context.Context, roleArn, expectedAction, expectedProviderArn string) (string, error) {
+	if m.roleTrustErr != nil {
+		return "", m.roleTrustErr
+	}
 	return "", nil
 }
 func (m *mockValAwsService) CheckCallerIdentity(_ context.Context, accessKeyID, secretKey string) (string, error) {
+	if m.callerIdentityErr != nil {
+		return "", m.callerIdentityErr
+	}
 	return "", nil
 }
 
@@ -346,6 +363,65 @@ func TestValidateAWSWithOIDC_Step6_STSFail(t *testing.T) {
 	assert.Equal(t, 6, resp.FailedStep)
 }
 
+// ── AWS OIDC 실패 단계 RemediationGuide 검증 ─────────────────────────────────
+
+// TestValidateAWSWithOIDC_Step3_Remediation: Keycloak 토큰 발급 실패 시 Keycloak 설정 안내 첨부
+func TestValidateAWSWithOIDC_Step3_Remediation(t *testing.T) {
+	mapping := buildValMapping("OIDC",
+		"arn:aws:iam::123:oidc-provider/keycloak.example.com",
+		"arn:aws:iam::123:role/test-role",
+	)
+	kc := &mockValKcService{oidcErr: errValKcFail}
+	svc := newValService(stdValUserRole(), nil, mapping, nil, kc, nil)
+
+	resp, err := svc.ValidateCredentials(context.Background(), 1, "kc_user", valReq("aws", "OIDC"))
+
+	require.NoError(t, err)
+	require.Equal(t, 3, resp.FailedStep)
+	require.NotNil(t, resp.Steps[2].Remediation)
+	assert.Equal(t, awsKeycloakOidcClientRemediation.Summary, resp.Steps[2].Remediation.Summary)
+	assert.NotEmpty(t, resp.Steps[2].Remediation.ConsoleSteps)
+}
+
+// TestValidateAWSWithOIDC_Step4_Remediation: AWS OIDC Provider 미존재 시 IAM 콘솔 안내 첨부
+func TestValidateAWSWithOIDC_Step4_Remediation(t *testing.T) {
+	mapping := buildValMapping("OIDC",
+		"arn:aws:iam::123:oidc-provider/keycloak.example.com",
+		"arn:aws:iam::123:role/test-role",
+	)
+	kc := &mockValKcService{oidcToken: &gocloak.JWT{AccessToken: "a_very_long_kc_access_token_that_exceeds_100_chars_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}
+	awsSvc := &mockValAwsService{oidcProviderErr: errValAwsFail}
+	svc := newValService(stdValUserRole(), nil, mapping, nil, kc, awsSvc)
+
+	resp, err := svc.ValidateCredentials(context.Background(), 1, "kc_user", valReq("aws", "OIDC"))
+
+	require.NoError(t, err)
+	require.Equal(t, 4, resp.FailedStep)
+	require.NotNil(t, resp.Steps[3].Remediation)
+	assert.Equal(t, awsOidcProviderRemediation.Summary, resp.Steps[3].Remediation.Summary)
+	assert.NotEmpty(t, resp.Steps[3].Remediation.ConsoleSteps)
+	assert.Contains(t, resp.Steps[3].Remediation.DocsRef, "CSP-ADMIN-WORKFLOW.md")
+}
+
+// TestValidateAWSWithOIDC_Step5_Remediation: IAM Role Trust 실패 시 Trust Policy 템플릿 첨부
+func TestValidateAWSWithOIDC_Step5_Remediation(t *testing.T) {
+	mapping := buildValMapping("OIDC",
+		"arn:aws:iam::123:oidc-provider/keycloak.example.com",
+		"arn:aws:iam::123:role/test-role",
+	)
+	kc := &mockValKcService{oidcToken: &gocloak.JWT{AccessToken: "a_very_long_kc_access_token_that_exceeds_100_chars_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}
+	awsSvc := &mockValAwsService{roleTrustErr: errValAwsFail}
+	svc := newValService(stdValUserRole(), nil, mapping, nil, kc, awsSvc)
+
+	resp, err := svc.ValidateCredentials(context.Background(), 1, "kc_user", valReq("aws", "OIDC"))
+
+	require.NoError(t, err)
+	require.Equal(t, 5, resp.FailedStep)
+	require.NotNil(t, resp.Steps[4].Remediation)
+	assert.Equal(t, awsOidcRoleTrustRemediation.Summary, resp.Steps[4].Remediation.Summary)
+	assert.Contains(t, resp.Steps[4].Remediation.Template, "AssumeRoleWithWebIdentity")
+}
+
 // ── AWS SAML 단계별 실패 시나리오 ─────────────────────────────────────────────
 
 // TC-VAL-SAML-01: Step 1 실패 — 워크스페이스 역할 없음
@@ -379,6 +455,46 @@ func TestValidateAWSWithSAML_Step4_AssertionFail(t *testing.T) {
 	// checkKeycloakSAMLClient는 외부 의존성이므로 Step 3은 실패할 수 있음
 	// → SAML Step 4 테스트는 integration 테스트에서 수행
 	t.Skip("Step 3 requires real Keycloak connection — covered in integration tests")
+}
+
+// ── AWS SAML 실패 단계 RemediationGuide 검증 ─────────────────────────────────
+
+// TestValidateAWSWithSAML_Step5_Remediation: AWS SAML Provider 미존재 시 IAM 콘솔 안내 첨부
+func TestValidateAWSWithSAML_Step5_Remediation(t *testing.T) {
+	mapping := buildValMapping("SAML",
+		"arn:aws:iam::123:saml-provider/keycloak",
+		"arn:aws:iam::123:role/test-role",
+	)
+	kc := &mockValKcService{samlAssertion: "assertion-data"}
+	awsSvc := &mockValAwsService{samlProviderErr: errValAwsFail}
+	svc := newValService(stdValUserRole(), nil, mapping, nil, kc, awsSvc)
+
+	resp, err := svc.ValidateCredentials(context.Background(), 1, "kc_user", valReq("aws", "SAML"))
+
+	require.NoError(t, err)
+	require.Equal(t, 5, resp.FailedStep)
+	require.NotNil(t, resp.Steps[4].Remediation)
+	assert.Equal(t, awsSamlProviderRemediation.Summary, resp.Steps[4].Remediation.Summary)
+	assert.NotEmpty(t, resp.Steps[4].Remediation.ConsoleSteps)
+}
+
+// TestValidateAWSWithSAML_Step6_Remediation: IAM Role SAML Trust 실패 시 Trust Policy 템플릿 첨부
+func TestValidateAWSWithSAML_Step6_Remediation(t *testing.T) {
+	mapping := buildValMapping("SAML",
+		"arn:aws:iam::123:saml-provider/keycloak",
+		"arn:aws:iam::123:role/test-role",
+	)
+	kc := &mockValKcService{samlAssertion: "assertion-data"}
+	awsSvc := &mockValAwsService{roleTrustErr: errValAwsFail}
+	svc := newValService(stdValUserRole(), nil, mapping, nil, kc, awsSvc)
+
+	resp, err := svc.ValidateCredentials(context.Background(), 1, "kc_user", valReq("aws", "SAML"))
+
+	require.NoError(t, err)
+	require.Equal(t, 6, resp.FailedStep)
+	require.NotNil(t, resp.Steps[5].Remediation)
+	assert.Equal(t, awsSamlRoleTrustRemediation.Summary, resp.Steps[5].Remediation.Summary)
+	assert.Contains(t, resp.Steps[5].Remediation.Template, "AssumeRoleWithSAML")
 }
 
 // ── AWS SECRET_KEY 단계별 시나리오 ────────────────────────────────────────────
@@ -419,6 +535,37 @@ func TestValidateAWSWithSecretKey_Step2_EmptyKeyID(t *testing.T) {
 	assert.False(t, resp.Valid)
 	assert.Equal(t, 2, resp.FailedStep)
 	assert.Contains(t, resp.Error, "access_key_id 또는 secret_access_key 비어 있음")
+}
+
+// ── AWS SECRET_KEY 실패 단계 RemediationGuide 검증 ───────────────────────────
+
+// TestValidateAWSWithSecretKey_Step2_Remediation: CspIdpConfig 없음 → 콘솔 안내 첨부
+func TestValidateAWSWithSecretKey_Step2_Remediation(t *testing.T) {
+	mapping := buildValMapping("SECRET_KEY", "", "") // CspIdpConfig nil
+	svc := newValService(stdValUserRole(), nil, mapping, nil, nil, nil)
+
+	resp, err := svc.ValidateCredentials(context.Background(), 1, "kc_user", valReq("aws", "SECRET_KEY"))
+
+	require.NoError(t, err)
+	require.Equal(t, 2, resp.FailedStep)
+	require.NotNil(t, resp.Steps[1].Remediation)
+	assert.Equal(t, awsSecretKeyConfigRemediation.Summary, resp.Steps[1].Remediation.Summary)
+	assert.NotEmpty(t, resp.Steps[1].Remediation.ConsoleSteps)
+}
+
+// TestValidateAWSWithSecretKey_Step3_Remediation: GetCallerIdentity 실패 → 콘솔 안내 첨부
+func TestValidateAWSWithSecretKey_Step3_Remediation(t *testing.T) {
+	mapping := buildValMappingWithSecretKey("AKIAEXAMPLE", "secretvalue")
+	awsSvc := &mockValAwsService{callerIdentityErr: errValAwsFail}
+	svc := newValService(stdValUserRole(), nil, mapping, nil, nil, awsSvc)
+
+	resp, err := svc.ValidateCredentials(context.Background(), 1, "kc_user", valReq("aws", "SECRET_KEY"))
+
+	require.NoError(t, err)
+	require.Equal(t, 3, resp.FailedStep)
+	require.NotNil(t, resp.Steps[2].Remediation)
+	assert.Equal(t, awsSecretKeyInvalidRemediation.Summary, resp.Steps[2].Remediation.Summary)
+	assert.NotEmpty(t, resp.Steps[2].Remediation.ConsoleSteps)
 }
 
 // ── GCP OIDC 단계별 시나리오 ─────────────────────────────────────────────────

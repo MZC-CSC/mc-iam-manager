@@ -45,6 +45,138 @@ func NewCspValidationService(db *gorm.DB) *CspValidationService {
 	}
 }
 
+// --- AWS 검증 실패 단계별 RemediationGuide (CSP 콘솔에서의 조치 방법) ---
+// 상세 절차는 mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md 참조.
+
+// awsOidcProviderRemediation Step 4 (AWS OIDC Provider 확인) 실패 시 안내
+var awsOidcProviderRemediation = &model.RemediationGuide{
+	Summary: "AWS에 Keycloak을 신뢰하는 OIDC Identity Provider가 등록되어 있지 않습니다.",
+	ConsoleSteps: []string{
+		"AWS Console → IAM → Identity providers → Add provider",
+		"Provider type: OpenID Connect",
+		"Provider URL: Keycloak realm issuer URL (예: https://<keycloak-host>/realms/<realm>)",
+		"Audience: mc-iam-manager Keycloak OIDC 클라이언트 ID",
+		"생성 후 ARN을 CspRole.idp_identifier에 등록",
+	},
+	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-4",
+}
+
+// awsOidcRoleTrustRemediation Step 5 (IAM Role WebIdentity Trust 확인) 실패 시 안내
+var awsOidcRoleTrustRemediation = &model.RemediationGuide{
+	Summary: "IAM Role의 Trust Policy에 OIDC Provider를 통한 AssumeRoleWithWebIdentity 권한이 없습니다.",
+	ConsoleSteps: []string{
+		"AWS Console → IAM → Roles → 대상 역할 선택 → Trust relationships → Edit trust policy",
+	},
+	Template: `{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "<OIDC Provider ARN>"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "<keycloak-host>/realms/<realm>:aud": "<Keycloak OIDC 클라이언트 ID>"
+        }
+      }
+    }
+  ]
+}`,
+	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-5",
+}
+
+// awsKeycloakOidcClientRemediation Step 3 (Keycloak OIDC 토큰 발급) 실패 시 안내 — Keycloak 서비스 계정/클라이언트 설정 확인
+var awsKeycloakOidcClientRemediation = &model.RemediationGuide{
+	Summary: "Keycloak OIDC 클라이언트(Service Account) 설정이 올바르지 않아 토큰 발급에 실패했습니다.",
+	ConsoleSteps: []string{
+		"Keycloak Admin Console → Clients → <OIDC 클라이언트> → Settings에서 Client authentication: On, Service accounts roles: On 확인",
+		"Realm settings → Client policies에서 Token Exchange가 허용되어 있는지 확인",
+		"MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_ID/SECRET 환경변수가 실제 Keycloak 클라이언트와 일치하는지 확인",
+	},
+	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-1",
+}
+
+// awsSamlProviderRemediation Step 5 (AWS SAML Provider 확인) 실패 시 안내
+var awsSamlProviderRemediation = &model.RemediationGuide{
+	Summary: "AWS에 Keycloak SAML 메타데이터로 등록된 SAML Identity Provider가 없습니다.",
+	ConsoleSteps: []string{
+		"AWS Console → IAM → Identity providers → Add provider",
+		"Provider type: SAML",
+		"Keycloak SAML 클라이언트의 메타데이터 XML 업로드 (예: https://<keycloak-host>/realms/<realm>/protocol/saml/descriptor)",
+		"생성 후 ARN을 CspRole.idp_identifier에 등록",
+	},
+	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-4",
+}
+
+// awsSamlRoleTrustRemediation Step 6 (IAM Role SAML Trust 확인) 실패 시 안내
+var awsSamlRoleTrustRemediation = &model.RemediationGuide{
+	Summary: "IAM Role의 Trust Policy에 SAML Provider를 통한 AssumeRoleWithSAML 권한이 없습니다.",
+	ConsoleSteps: []string{
+		"AWS Console → IAM → Roles → 대상 역할 선택 → Trust relationships → Edit trust policy",
+	},
+	Template: `{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "<SAML Provider ARN>"
+      },
+      "Action": "sts:AssumeRoleWithSAML",
+      "Condition": {
+        "StringEquals": {
+          "SAML:aud": "https://signin.aws.amazon.com/saml"
+        }
+      }
+    }
+  ]
+}`,
+	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-5",
+}
+
+// awsKeycloakSamlClientRemediation Step 3 (Keycloak SAML 클라이언트 확인) 실패 시 안내
+var awsKeycloakSamlClientRemediation = &model.RemediationGuide{
+	Summary: "Keycloak에 AWS SAML 연동용 클라이언트가 없거나 Role attribute mapper가 설정되어 있지 않습니다.",
+	ConsoleSteps: []string{
+		"Keycloak Admin Console → Clients → Create client (Client Type: SAML)",
+		"Client ID: urn:amazon:webservices (AWS 기준)",
+		"Client scopes → Protocol mappers에 Role List mapper 추가 (Attribute name: https://aws.amazon.com/SAML/Attributes/Role)",
+	},
+	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-1",
+}
+
+// awsKeycloakSamlAssertionRemediation Step 4 (SAML Assertion 발급 및 검증) 실패 시 안내
+var awsKeycloakSamlAssertionRemediation = &model.RemediationGuide{
+	Summary: "SAML Assertion 발급에 실패했습니다 — Keycloak SAML 클라이언트/서비스 계정 설정을 확인하세요.",
+	ConsoleSteps: []string{
+		"Keycloak Admin Console에서 SAML 클라이언트가 활성화(Enabled)되어 있는지 확인",
+		"MC_IAM_MANAGER_PLATFORMADMIN_ID/PASSWORD 환경변수로 platform admin 로그인이 가능한지 확인",
+		"Realm settings → Client policies에서 Token Exchange 허용 여부 확인",
+	},
+	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-1",
+}
+
+// awsSecretKeyConfigRemediation Step 2 (CspIdpConfig 설정 확인, SECRET_KEY) 실패 시 안내
+var awsSecretKeyConfigRemediation = &model.RemediationGuide{
+	Summary: "AWS Access Key/Secret Key가 CspIdpConfig에 등록되어 있지 않습니다.",
+	ConsoleSteps: []string{
+		"AWS Console → IAM → Users → 대상 사용자 → Security credentials → Create access key",
+		"발급된 access_key_id/secret_access_key를 CspIdpConfig.Config에 등록 (POST /api/csp-idp-configs)",
+	},
+	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-4",
+}
+
+// awsSecretKeyInvalidRemediation Step 3 (AWS 연결 확인, SECRET_KEY) 실패 시 안내
+var awsSecretKeyInvalidRemediation = &model.RemediationGuide{
+	Summary: "등록된 Access Key/Secret Key가 유효하지 않습니다 (AWS STS GetCallerIdentity 실패).",
+	ConsoleSteps: []string{
+		"AWS Console에서 해당 IAM 사용자의 Access Key가 활성 상태(Active)인지 확인",
+		"키가 비활성화/삭제되었다면 새 키를 발급하여 CspIdpConfig 갱신",
+	},
+}
+
 // resolveUserRepo 테스트 주입 우선, 없으면 프로덕션 repo 반환
 func (s *CspValidationService) resolveUserRepo() valUserRepo {
 	if s.userRepoIface != nil {
@@ -218,7 +350,7 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 
 	// Step 3: Keycloak OIDC 토큰 발급
 	var accessToken string
-	if !stepRunner(steps, 2, nil, func() (string, error) {
+	if !stepRunner(steps, 2, awsKeycloakOidcClientRemediation, func() (string, error) {
 		jwt, err := s.keycloakService.GetImpersonationTokenByServiceAccount(ctx)
 		if err != nil {
 			return "", fmt.Errorf("Keycloak OIDC 토큰 발급 실패: %v — Keycloak OIDC 클라이언트 설정 또는 시크릿 확인", err)
@@ -234,14 +366,14 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 	}
 
 	// Step 4: AWS OIDC Provider 확인
-	if !stepRunner(steps, 3, nil, func() (string, error) {
+	if !stepRunner(steps, 3, awsOidcProviderRemediation, func() (string, error) {
 		return s.awsCredService.CheckOIDCProvider(ctx, idpArn)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 4, steps), nil
 	}
 
 	// Step 5: IAM Role WebIdentity Trust 확인
-	if !stepRunner(steps, 4, nil, func() (string, error) {
+	if !stepRunner(steps, 4, awsOidcRoleTrustRemediation, func() (string, error) {
 		return s.awsCredService.CheckRoleTrust(ctx, roleArn, "sts:AssumeRoleWithWebIdentity", idpArn)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 5, steps), nil
@@ -321,7 +453,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 	if cspType == "aws" && !strings.Contains(kcSamlClientID, "urn:amazon") {
 		kcSamlClientID = os.Getenv("SAML_CLIENT_ID_AWS")
 	}
-	if !stepRunner(steps, 2, nil, func() (string, error) {
+	if !stepRunner(steps, 2, awsKeycloakSamlClientRemediation, func() (string, error) {
 		return s.keycloakService.CheckSAMLClientConfig(ctx, kcSamlClientID)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 3, steps), nil
@@ -330,7 +462,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 	// Step 4: SAML Assertion 발급 및 검증
 	// token exchange audience는 Keycloak 클라이언트 ID (kcSamlClientID) 사용
 	var samlAssertion string
-	if !stepRunner(steps, 3, nil, func() (string, error) {
+	if !stepRunner(steps, 3, awsKeycloakSamlAssertionRemediation, func() (string, error) {
 		assertion, err := s.keycloakService.GetSamlAssertionByServiceAccount(ctx, kcSamlClientID)
 		if err != nil {
 			return "", fmt.Errorf("SAML Assertion 발급 실패: %v — Keycloak SAML 클라이언트 설정 확인", err)
@@ -344,14 +476,14 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 	}
 
 	// Step 5: AWS SAML Provider 확인
-	if !stepRunner(steps, 4, nil, func() (string, error) {
+	if !stepRunner(steps, 4, awsSamlProviderRemediation, func() (string, error) {
 		return s.awsCredService.CheckSAMLProvider(ctx, principalArn)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 5, steps), nil
 	}
 
 	// Step 6: IAM Role SAML Trust 확인
-	if !stepRunner(steps, 5, nil, func() (string, error) {
+	if !stepRunner(steps, 5, awsSamlRoleTrustRemediation, func() (string, error) {
 		return s.awsCredService.CheckRoleTrust(ctx, roleArn, "sts:AssumeRoleWithSAML", principalArn)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 6, steps), nil
@@ -409,7 +541,7 @@ func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, use
 
 	// Step 2: CspIdpConfig 설정 확인
 	var accessKeyID, secretKey string
-	if !stepRunner(steps, 1, nil, func() (string, error) {
+	if !stepRunner(steps, 1, awsSecretKeyConfigRemediation, func() (string, error) {
 		cspRole := mapping.CspRoles[0]
 		if cspRole.CspIdpConfig == nil {
 			return "", fmt.Errorf("CspIdpConfig 없음 — CspRole에 IDP 설정 연결 필요")
@@ -425,7 +557,7 @@ func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, use
 	}
 
 	// Step 3: AWS 연결 확인 (GetCallerIdentity)
-	if !stepRunner(steps, 2, nil, func() (string, error) {
+	if !stepRunner(steps, 2, awsSecretKeyInvalidRemediation, func() (string, error) {
 		return s.awsCredService.CheckCallerIdentity(ctx, accessKeyID, secretKey)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 3, steps), nil
