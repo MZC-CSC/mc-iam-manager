@@ -206,7 +206,7 @@ func TestBuildValidationSteps_Unsupported(t *testing.T) {
 // TC-VAL-RUNNER-01: 성공 시 ok 상태 반환
 func TestStepRunner_Success(t *testing.T) {
 	steps := buildValidationSteps("aws", "SECRET_KEY")
-	ok := stepRunner(steps, 0, func() (string, error) {
+	ok := stepRunner(steps, 0, nil, func() (string, error) {
 		return "detail text", nil
 	})
 	assert.True(t, ok)
@@ -217,7 +217,7 @@ func TestStepRunner_Success(t *testing.T) {
 // TC-VAL-RUNNER-02: 실패 시 failed 상태 + false 반환
 func TestStepRunner_Failure(t *testing.T) {
 	steps := buildValidationSteps("aws", "SECRET_KEY")
-	ok := stepRunner(steps, 0, func() (string, error) {
+	ok := stepRunner(steps, 0, nil, func() (string, error) {
 		return "", errors.New("something went wrong")
 	})
 	assert.False(t, ok)

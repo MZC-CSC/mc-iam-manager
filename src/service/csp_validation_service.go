@@ -119,12 +119,13 @@ func buildValidationSteps(cspType, authMethod string) []model.ValidationStep {
 	return steps
 }
 
-// stepRunner 단계 실행 헬퍼 — 실패 시 false 반환
-func stepRunner(steps []model.ValidationStep, idx int, fn func() (string, error)) bool {
+// stepRunner 단계 실행 헬퍼 — 실패 시 false 반환. remediation은 실패 시에만 해당 단계에 첨부된다(nil이면 미첨부).
+func stepRunner(steps []model.ValidationStep, idx int, remediation *model.RemediationGuide, fn func() (string, error)) bool {
 	detail, err := fn()
 	if err != nil {
 		steps[idx].Status = model.ValidationStepFailed
 		steps[idx].Detail = err.Error()
+		steps[idx].Remediation = remediation
 		return false
 	}
 	steps[idx].Status = model.ValidationStepOk
@@ -186,7 +187,7 @@ func (s *CspValidationService) ValidateCredentials(ctx context.Context, userID u
 func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID uint, kcUserID string, workspaceID uint, cspType, authMethod string, steps []model.ValidationStep) (*model.CspValidationResponse, error) {
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
-	if !stepRunner(steps, 0, func() (string, error) {
+	if !stepRunner(steps, 0, nil, func() (string, error) {
 		userRole, err := s.resolveUserRepo().FindUserRoleInWorkspace(userID, workspaceID)
 		if err != nil || userRole == nil {
 			return "", fmt.Errorf("워크스페이스 역할 없음 — DB에 auth_method=OIDC 매핑 추가 필요")
@@ -203,7 +204,7 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 
 	// Step 2: CspRole 설정 확인
 	var idpArn, roleArn string
-	if !stepRunner(steps, 1, func() (string, error) {
+	if !stepRunner(steps, 1, nil, func() (string, error) {
 		cspRole := mapping.CspRoles[0]
 		if cspRole.IdpIdentifier == "" || cspRole.IamIdentifier == "" {
 			return "", fmt.Errorf("CspRole.idp_identifier(OIDC Provider ARN) 또는 iam_identifier(Role ARN) 비어 있음")
@@ -217,7 +218,7 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 
 	// Step 3: Keycloak OIDC 토큰 발급
 	var accessToken string
-	if !stepRunner(steps, 2, func() (string, error) {
+	if !stepRunner(steps, 2, nil, func() (string, error) {
 		jwt, err := s.keycloakService.GetImpersonationTokenByServiceAccount(ctx)
 		if err != nil {
 			return "", fmt.Errorf("Keycloak OIDC 토큰 발급 실패: %v — Keycloak OIDC 클라이언트 설정 또는 시크릿 확인", err)
@@ -233,14 +234,14 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 	}
 
 	// Step 4: AWS OIDC Provider 확인
-	if !stepRunner(steps, 3, func() (string, error) {
+	if !stepRunner(steps, 3, nil, func() (string, error) {
 		return s.awsCredService.CheckOIDCProvider(ctx, idpArn)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 4, steps), nil
 	}
 
 	// Step 5: IAM Role WebIdentity Trust 확인
-	if !stepRunner(steps, 4, func() (string, error) {
+	if !stepRunner(steps, 4, nil, func() (string, error) {
 		return s.awsCredService.CheckRoleTrust(ctx, roleArn, "sts:AssumeRoleWithWebIdentity", idpArn)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 5, steps), nil
@@ -252,7 +253,7 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 		defaultRegion = "ap-northeast-2"
 	}
 	var credSummary *model.CredentialSummary
-	if !stepRunner(steps, 5, func() (string, error) {
+	if !stepRunner(steps, 5, nil, func() (string, error) {
 		creds, err := s.awsCredService.AssumeRoleWithWebIdentity(ctx, roleArn, kcUserID, accessToken, idpArn, defaultRegion)
 		if err != nil {
 			return "", fmt.Errorf("AssumeRoleWithWebIdentity 실패: %v", err)
@@ -281,7 +282,7 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID uint, workspaceID uint, cspType, authMethod string, steps []model.ValidationStep) (*model.CspValidationResponse, error) {
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
-	if !stepRunner(steps, 0, func() (string, error) {
+	if !stepRunner(steps, 0, nil, func() (string, error) {
 		userRole, err := s.resolveUserRepo().FindUserRoleInWorkspace(userID, workspaceID)
 		if err != nil || userRole == nil {
 			return "", fmt.Errorf("워크스페이스 역할 없음 — DB에 auth_method=SAML 매핑 추가 필요")
@@ -298,7 +299,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 
 	// Step 2: CspRole 설정 확인
 	var principalArn, roleArn, samlClientAudience string
-	if !stepRunner(steps, 1, func() (string, error) {
+	if !stepRunner(steps, 1, nil, func() (string, error) {
 		cspRole := mapping.CspRoles[0]
 		if cspRole.IdpIdentifier == "" || cspRole.IamIdentifier == "" {
 			return "", fmt.Errorf("CspRole.idp_identifier(Principal ARN) 또는 iam_identifier(Role ARN) 비어 있음")
@@ -320,7 +321,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 	if cspType == "aws" && !strings.Contains(kcSamlClientID, "urn:amazon") {
 		kcSamlClientID = os.Getenv("SAML_CLIENT_ID_AWS")
 	}
-	if !stepRunner(steps, 2, func() (string, error) {
+	if !stepRunner(steps, 2, nil, func() (string, error) {
 		return s.keycloakService.CheckSAMLClientConfig(ctx, kcSamlClientID)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 3, steps), nil
@@ -329,7 +330,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 	// Step 4: SAML Assertion 발급 및 검증
 	// token exchange audience는 Keycloak 클라이언트 ID (kcSamlClientID) 사용
 	var samlAssertion string
-	if !stepRunner(steps, 3, func() (string, error) {
+	if !stepRunner(steps, 3, nil, func() (string, error) {
 		assertion, err := s.keycloakService.GetSamlAssertionByServiceAccount(ctx, kcSamlClientID)
 		if err != nil {
 			return "", fmt.Errorf("SAML Assertion 발급 실패: %v — Keycloak SAML 클라이언트 설정 확인", err)
@@ -343,14 +344,14 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 	}
 
 	// Step 5: AWS SAML Provider 확인
-	if !stepRunner(steps, 4, func() (string, error) {
+	if !stepRunner(steps, 4, nil, func() (string, error) {
 		return s.awsCredService.CheckSAMLProvider(ctx, principalArn)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 5, steps), nil
 	}
 
 	// Step 6: IAM Role SAML Trust 확인
-	if !stepRunner(steps, 5, func() (string, error) {
+	if !stepRunner(steps, 5, nil, func() (string, error) {
 		return s.awsCredService.CheckRoleTrust(ctx, roleArn, "sts:AssumeRoleWithSAML", principalArn)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 6, steps), nil
@@ -362,7 +363,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 		samlDefaultRegion = "ap-northeast-2"
 	}
 	var credSummary *model.CredentialSummary
-	if !stepRunner(steps, 6, func() (string, error) {
+	if !stepRunner(steps, 6, nil, func() (string, error) {
 		creds, err := s.awsCredService.AssumeRoleWithSAML(ctx, roleArn, principalArn, samlAssertion, samlDefaultRegion)
 		if err != nil {
 			return "", fmt.Errorf("AssumeRoleWithSAML 실패: %v", err)
@@ -391,7 +392,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, userID uint, workspaceID uint, cspType, authMethod string, steps []model.ValidationStep) (*model.CspValidationResponse, error) {
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
-	if !stepRunner(steps, 0, func() (string, error) {
+	if !stepRunner(steps, 0, nil, func() (string, error) {
 		userRole, err := s.resolveUserRepo().FindUserRoleInWorkspace(userID, workspaceID)
 		if err != nil || userRole == nil {
 			return "", fmt.Errorf("워크스페이스 역할 없음")
@@ -408,7 +409,7 @@ func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, use
 
 	// Step 2: CspIdpConfig 설정 확인
 	var accessKeyID, secretKey string
-	if !stepRunner(steps, 1, func() (string, error) {
+	if !stepRunner(steps, 1, nil, func() (string, error) {
 		cspRole := mapping.CspRoles[0]
 		if cspRole.CspIdpConfig == nil {
 			return "", fmt.Errorf("CspIdpConfig 없음 — CspRole에 IDP 설정 연결 필요")
@@ -424,7 +425,7 @@ func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, use
 	}
 
 	// Step 3: AWS 연결 확인 (GetCallerIdentity)
-	if !stepRunner(steps, 2, func() (string, error) {
+	if !stepRunner(steps, 2, nil, func() (string, error) {
 		return s.awsCredService.CheckCallerIdentity(ctx, accessKeyID, secretKey)
 	}) {
 		return buildFailedResponse(cspType, authMethod, 3, steps), nil
@@ -444,7 +445,7 @@ func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, use
 func (s *CspValidationService) validateGCPWithOIDC(ctx context.Context, userID uint, kcUserID string, workspaceID uint, cspType, authMethod string, steps []model.ValidationStep) (*model.CspValidationResponse, error) {
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
-	if !stepRunner(steps, 0, func() (string, error) {
+	if !stepRunner(steps, 0, nil, func() (string, error) {
 		userRole, err := s.resolveUserRepo().FindUserRoleInWorkspace(userID, workspaceID)
 		if err != nil || userRole == nil {
 			return "", fmt.Errorf("워크스페이스 역할 없음")
@@ -461,7 +462,7 @@ func (s *CspValidationService) validateGCPWithOIDC(ctx context.Context, userID u
 
 	// Step 2: CspRole 설정 확인
 	var wifProvider, saEmail string
-	if !stepRunner(steps, 1, func() (string, error) {
+	if !stepRunner(steps, 1, nil, func() (string, error) {
 		cspRole := mapping.CspRoles[0]
 		if cspRole.IdpIdentifier == "" || cspRole.IamIdentifier == "" {
 			return "", fmt.Errorf("idp_identifier(WIF Provider) 또는 iam_identifier(SA email) 비어 있음")
@@ -475,7 +476,7 @@ func (s *CspValidationService) validateGCPWithOIDC(ctx context.Context, userID u
 
 	// Step 3: Keycloak OIDC 토큰 발급
 	var accessToken string
-	if !stepRunner(steps, 2, func() (string, error) {
+	if !stepRunner(steps, 2, nil, func() (string, error) {
 		jwt, err := s.keycloakService.GetImpersonationTokenByServiceAccount(ctx)
 		if err != nil {
 			return "", fmt.Errorf("Keycloak OIDC 토큰 발급 실패: %v", err)
@@ -493,20 +494,20 @@ func (s *CspValidationService) validateGCPWithOIDC(ctx context.Context, userID u
 	gcpCredService := NewGcpCredentialService()
 	var credSummary *model.CredentialSummary
 
-	if !stepRunner(steps, 3, func() (string, error) {
+	if !stepRunner(steps, 3, nil, func() (string, error) {
 		// GCP STS exchange only (ExchangeTokenAndImpersonate가 전체를 수행하므로 step 4에서 전체 실행)
 		return "GCP STS 토큰 교환 시도 중...", nil
 	}) {
 		return buildFailedResponse(cspType, authMethod, 4, steps), nil
 	}
 
-	if !stepRunner(steps, 4, func() (string, error) {
+	if !stepRunner(steps, 4, nil, func() (string, error) {
 		return "SA Impersonation 시도 중...", nil
 	}) {
 		return buildFailedResponse(cspType, authMethod, 5, steps), nil
 	}
 
-	if !stepRunner(steps, 5, func() (string, error) {
+	if !stepRunner(steps, 5, nil, func() (string, error) {
 		creds, err := gcpCredService.ExchangeTokenAndImpersonate(ctx, wifProvider, saEmail, accessToken, "jwt")
 		if err != nil {
 			return "", fmt.Errorf("GCP 자격증명 발급 실패: %v — WIF Pool/Provider 설정 또는 SA 권한 확인", err)
