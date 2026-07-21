@@ -25,13 +25,14 @@ type valMappingRepo interface {
 
 // CspValidationService CSP 인증 설정 단계별 검증 서비스
 type CspValidationService struct {
-	db               *gorm.DB
-	userRepo         *repository.UserRepository
-	mappingRepo      *repository.CspMappingRepository
-	userRepoIface    valUserRepo    // 테스트 주입용 (nil이면 userRepo 사용)
-	mappingRepoIface valMappingRepo // 테스트 주입용 (nil이면 mappingRepo 사용)
-	keycloakService  KeycloakService
-	awsCredService   AwsCredentialService
+	db                  *gorm.DB
+	userRepo            *repository.UserRepository
+	mappingRepo         *repository.CspMappingRepository
+	userRepoIface       valUserRepo          // 테스트 주입용 (nil이면 userRepo 사용)
+	mappingRepoIface    valMappingRepo       // 테스트 주입용 (nil이면 mappingRepo 사용)
+	keycloakService     KeycloakService
+	awsCredService      AwsCredentialService
+	gcpCredServiceIface GcpCredentialService // 테스트 주입용 (nil이면 NewGcpCredentialService() 사용)
 }
 
 // NewCspValidationService 새 CspValidationService 인스턴스 생성
@@ -191,6 +192,43 @@ func (s *CspValidationService) resolveMappingRepo() valMappingRepo {
 		return s.mappingRepoIface
 	}
 	return s.mappingRepo
+}
+
+// resolveGcpCredService 테스트 주입 우선, 없으면 프로덕션 서비스 반환
+func (s *CspValidationService) resolveGcpCredService() GcpCredentialService {
+	if s.gcpCredServiceIface != nil {
+		return s.gcpCredServiceIface
+	}
+	return NewGcpCredentialService()
+}
+
+// --- GCP OIDC 단계별 RemediationGuide ---
+// CSP 콘솔에서의 실제 조치 방법. 참고: mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md (Step 4, 5 — GCP 섹션)
+
+// gcpStsRemediation GCP STS 토큰 교환(step 4) 실패 시 안내 — WIF Pool/Provider가 없거나
+// Keycloak을 신뢰하도록 설정되어 있지 않은 경우.
+var gcpStsRemediation = &model.RemediationGuide{
+	Summary: "GCP Workload Identity Federation Pool/Provider가 Keycloak을 신뢰하도록 설정되어 있지 않거나 존재하지 않습니다.",
+	ConsoleSteps: []string{
+		"GCP Console → IAM & Admin → Workload Identity Federation → Create Pool",
+		"Pool에 OIDC Provider 추가: Issuer URL = Keycloak realm issuer (예: https://<keycloak-host>/realms/<realm>)",
+		"Attribute mapping 설정 (google.subject = assertion.sub 등)",
+		"생성된 리소스 이름(projects/<NUM>/locations/global/workloadIdentityPools/<POOL>/providers/<PROVIDER>)을 CspRole.idp_identifier에 등록",
+	},
+	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-4",
+}
+
+// gcpSaImpersonationRemediation SA Impersonation(step 5) 실패 시 안내 — 대상 Service Account가
+// 없거나 WIF Pool에 workloadIdentityUser 권한이 부여되어 있지 않은 경우.
+var gcpSaImpersonationRemediation = &model.RemediationGuide{
+	Summary: "대상 Service Account가 없거나, WIF Pool에서 해당 SA를 impersonate할 권한(roles/iam.workloadIdentityUser)이 없습니다.",
+	ConsoleSteps: []string{
+		"GCP Console → IAM & Admin → Service Accounts → Create Service Account (예: mciam-<role>@<project>.iam.gserviceaccount.com)",
+		"IAM & Admin → IAM → 해당 SA에 필요한 권한 부여",
+		"Service Account → Permissions → Grant Access → WIF Pool의 principalSet에 roles/iam.workloadIdentityUser 부여",
+		"SA 이메일을 CspRole.iam_identifier에 등록",
+	},
+	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-5",
 }
 
 // buildSteps CSP×AuthMethod별 전체 단계를 skipped 초기 상태로 반환
@@ -619,31 +657,36 @@ func (s *CspValidationService) validateGCPWithOIDC(ctx context.Context, userID u
 		return buildFailedResponse(cspType, authMethod, 3, steps), nil
 	}
 
-	// Step 4: GCP STS 토큰 교환
-	// Step 5: SA Impersonation
-	// Step 6: 임시자격증명 발급
-	// GCP는 ExchangeTokenAndImpersonate에서 한 번에 처리 — 단계를 순서대로 시도
-	gcpCredService := NewGcpCredentialService()
-	var credSummary *model.CredentialSummary
-
-	if !stepRunner(steps, 3, nil, func() (string, error) {
-		// GCP STS exchange only (ExchangeTokenAndImpersonate가 전체를 수행하므로 step 4에서 전체 실행)
-		return "GCP STS 토큰 교환 시도 중...", nil
+	// Step 4: GCP STS 토큰 교환 (Keycloak JWT → GCP federated access token)
+	gcpCredService := s.resolveGcpCredService()
+	var federatedToken string
+	if !stepRunner(steps, 3, gcpStsRemediation, func() (string, error) {
+		token, err := gcpCredService.ExchangeToken(ctx, wifProvider, accessToken, "jwt")
+		if err != nil {
+			return "", fmt.Errorf("GCP STS 토큰 교환 실패: %v — WIF Pool/Provider 설정 확인", err)
+		}
+		federatedToken = token
+		return fmt.Sprintf("GCP federated token 발급 완료 (len=%d)", len(federatedToken)), nil
 	}) {
 		return buildFailedResponse(cspType, authMethod, 4, steps), nil
 	}
 
-	if !stepRunner(steps, 4, nil, func() (string, error) {
-		return "SA Impersonation 시도 중...", nil
+	// Step 5: SA Impersonation (federated token → SA-impersonated access token)
+	var creds *model.CspCredentialResponse
+	if !stepRunner(steps, 4, gcpSaImpersonationRemediation, func() (string, error) {
+		c, err := gcpCredService.GenerateAccessToken(ctx, saEmail, federatedToken)
+		if err != nil {
+			return "", fmt.Errorf("SA Impersonation 실패: %v — SA 존재 여부 및 WIF Pool의 workloadIdentityUser 권한 확인", err)
+		}
+		creds = c
+		return fmt.Sprintf("SA Impersonation 완료 (accessToken len=%d)", len(creds.AccessToken)), nil
 	}) {
 		return buildFailedResponse(cspType, authMethod, 5, steps), nil
 	}
 
+	// Step 6: 임시자격증명 발급 (step 4-5에서 이미 발급된 자격증명 요약)
+	var credSummary *model.CredentialSummary
 	if !stepRunner(steps, 5, nil, func() (string, error) {
-		creds, err := gcpCredService.ExchangeTokenAndImpersonate(ctx, wifProvider, saEmail, accessToken, "jwt")
-		if err != nil {
-			return "", fmt.Errorf("GCP 자격증명 발급 실패: %v — WIF Pool/Provider 설정 또는 SA 권한 확인", err)
-		}
 		credSummary = &model.CredentialSummary{
 			AccessKeyId: creds.AccessToken,
 			Expiration:  creds.Expiration,

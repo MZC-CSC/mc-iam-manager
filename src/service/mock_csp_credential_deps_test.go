@@ -42,10 +42,23 @@ func (m *mockAwsCredService) CheckCallerIdentity(_ context.Context, accessKeyID,
 type mockGcpCredService struct {
 	result *model.CspCredentialResponse
 	err    error
+
+	federatedToken string
+	exchangeErr    error
+	genResult      *model.CspCredentialResponse
+	genErr         error
 }
 
 func (m *mockGcpCredService) ExchangeTokenAndImpersonate(_ context.Context, wif, sa, token, tokenType string) (*model.CspCredentialResponse, error) {
 	return m.result, m.err
+}
+
+func (m *mockGcpCredService) ExchangeToken(_ context.Context, wifProviderResourceName, subjectToken, subjectTokenType string) (string, error) {
+	return m.federatedToken, m.exchangeErr
+}
+
+func (m *mockGcpCredService) GenerateAccessToken(_ context.Context, serviceAccountEmail, federatedToken string) (*model.CspCredentialResponse, error) {
+	return m.genResult, m.genErr
 }
 
 // ── Alibaba ──────────────────────────────────────────────────────────────────

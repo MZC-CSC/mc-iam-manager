@@ -611,6 +611,83 @@ func TestValidateGCPWithOIDC_Step3_KcFail(t *testing.T) {
 	assert.Equal(t, 3, resp.FailedStep)
 }
 
+// TC-VAL-GCP-04: Step 4 실패 — GCP STS 토큰 교환 실패 (WIF Pool/Provider 미설정) → remediation 첨부
+func TestValidateGCPWithOIDC_Step4_StsFail(t *testing.T) {
+	mapping := buildValMapping("OIDC",
+		"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/kc",
+		"sa@project.iam.gserviceaccount.com",
+	)
+	kc := &mockValKcService{oidcToken: &gocloak.JWT{AccessToken: "valid-oidc-jwt-token-1234567890"}}
+	svc := newValService(stdValUserRole(), nil, mapping, nil, kc, nil)
+	svc.gcpCredServiceIface = &mockGcpCredService{exchangeErr: errors.New("GCP STS returned HTTP 400: invalid audience")}
+
+	resp, err := svc.ValidateCredentials(context.Background(), 1, "kc_user", valReq("gcp", "OIDC"))
+
+	require.NoError(t, err)
+	assert.False(t, resp.Valid)
+	assert.Equal(t, 4, resp.FailedStep)
+	require.NotNil(t, resp.Steps[3].Remediation)
+	assert.Equal(t, gcpStsRemediation.Summary, resp.Steps[3].Remediation.Summary)
+	// Step 5 이후는 skipped
+	assert.Equal(t, model.ValidationStepSkipped, resp.Steps[4].Status)
+	assert.Nil(t, resp.Steps[4].Remediation)
+}
+
+// TC-VAL-GCP-05: Step 5 실패 — SA Impersonation 실패 (SA 없음/권한 없음) → remediation 첨부
+func TestValidateGCPWithOIDC_Step5_SaImpersonationFail(t *testing.T) {
+	mapping := buildValMapping("OIDC",
+		"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/kc",
+		"sa@project.iam.gserviceaccount.com",
+	)
+	kc := &mockValKcService{oidcToken: &gocloak.JWT{AccessToken: "valid-oidc-jwt-token-1234567890"}}
+	svc := newValService(stdValUserRole(), nil, mapping, nil, kc, nil)
+	svc.gcpCredServiceIface = &mockGcpCredService{
+		federatedToken: "federated-token-abc",
+		genErr:         errors.New("GCP IAM Credentials returned HTTP 403: permission denied"),
+	}
+
+	resp, err := svc.ValidateCredentials(context.Background(), 1, "kc_user", valReq("gcp", "OIDC"))
+
+	require.NoError(t, err)
+	assert.False(t, resp.Valid)
+	assert.Equal(t, 5, resp.FailedStep)
+	// Step 4는 성공(ok)이어야 함
+	assert.Equal(t, model.ValidationStepOk, resp.Steps[3].Status)
+	require.NotNil(t, resp.Steps[4].Remediation)
+	assert.Equal(t, gcpSaImpersonationRemediation.Summary, resp.Steps[4].Remediation.Summary)
+}
+
+// TC-VAL-GCP-06: 전체 성공 — Step 4~6 모두 통과, credentials 반환
+func TestValidateGCPWithOIDC_Step6_Success(t *testing.T) {
+	mapping := buildValMapping("OIDC",
+		"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/kc",
+		"sa@project.iam.gserviceaccount.com",
+	)
+	kc := &mockValKcService{oidcToken: &gocloak.JWT{AccessToken: "valid-oidc-jwt-token-1234567890"}}
+	svc := newValService(stdValUserRole(), nil, mapping, nil, kc, nil)
+	svc.gcpCredServiceIface = &mockGcpCredService{
+		federatedToken: "federated-token-abc",
+		genResult: &model.CspCredentialResponse{
+			CspType:     "gcp",
+			AccessToken: "sa-impersonated-access-token",
+			TokenType:   "Bearer",
+			Expiration:  time.Now().Add(1 * time.Hour),
+		},
+	}
+
+	resp, err := svc.ValidateCredentials(context.Background(), 1, "kc_user", valReq("gcp", "OIDC"))
+
+	require.NoError(t, err)
+	assert.True(t, resp.Valid)
+	assert.Equal(t, 0, resp.FailedStep)
+	require.NotNil(t, resp.Credentials)
+	assert.Equal(t, "sa-impersonated-access-token", resp.Credentials.AccessKeyId)
+	for _, step := range resp.Steps {
+		assert.Equal(t, model.ValidationStepOk, step.Status)
+		assert.Nil(t, step.Remediation)
+	}
+}
+
 // ── 응답 구조 완전성 검증 ─────────────────────────────────────────────────────
 
 // TC-VAL-RESP-01: 실패 응답에 항상 전체 단계 포함
