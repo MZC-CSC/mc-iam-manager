@@ -213,7 +213,8 @@ var gcpStsRemediation = &model.RemediationGuide{
 		"GCP Console → IAM & Admin → Workload Identity Federation → Create Pool",
 		"Pool에 OIDC Provider 추가: Issuer URL = Keycloak realm issuer (예: https://<keycloak-host>/realms/<realm>)",
 		"Attribute mapping 설정 (google.subject = assertion.sub 등)",
-		"생성된 리소스 이름(projects/<NUM>/locations/global/workloadIdentityPools/<POOL>/providers/<PROVIDER>)을 CspRole.idp_identifier에 등록",
+		"Attribute condition은 'in' 연산자 대신 등가 비교 권장: assertion.aud == \"<Keycloak 클라이언트 ID>\" (ID Token의 aud는 배열이 아닌 단일 문자열)",
+		"생성된 리소스 이름 앞에 //iam.googleapis.com/ 접두사를 붙여 CspRole.idp_identifier에 등록 (예: //iam.googleapis.com/projects/<NUM>/locations/global/workloadIdentityPools/<POOL>/providers/<PROVIDER> — 접두사 없으면 'Unsupported audience type' 오류)",
 	},
 	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-4",
 }
