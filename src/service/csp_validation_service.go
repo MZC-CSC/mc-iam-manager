@@ -222,11 +222,12 @@ var gcpStsRemediation = &model.RemediationGuide{
 // gcpSaImpersonationRemediation SA Impersonation(step 5) 실패 시 안내 — 대상 Service Account가
 // 없거나 WIF Pool에 workloadIdentityUser 권한이 부여되어 있지 않은 경우.
 var gcpSaImpersonationRemediation = &model.RemediationGuide{
-	Summary: "대상 Service Account가 없거나, WIF Pool에서 해당 SA를 impersonate할 권한(roles/iam.workloadIdentityUser)이 없습니다.",
+	Summary: "대상 Service Account가 없거나, WIF Pool에서 해당 SA를 impersonate/토큰 발급할 권한이 없습니다.",
 	ConsoleSteps: []string{
-		"GCP Console → IAM & Admin → Service Accounts → Create Service Account (예: mciam-<role>@<project>.iam.gserviceaccount.com)",
-		"IAM & Admin → IAM → 해당 SA에 필요한 권한 부여",
-		"Service Account → Permissions → Grant Access → WIF Pool의 principalSet에 roles/iam.workloadIdentityUser 부여",
+		"GCP Console → IAM & Admin → Service Accounts → Create Service Account (예: mcmp-<role>@<project>.iam.gserviceaccount.com)",
+		"Service Account → Permissions → Grant Access → WIF Pool의 principal(또는 principalSet)에 다음 두 역할을 모두 부여: roles/iam.workloadIdentityUser + roles/iam.serviceAccountTokenCreator " +
+			"(workloadIdentityUser만으로는 부족 — 실제 토큰 발급(generateAccessToken) 시 'Permission iam.serviceAccounts.getAccessToken denied'로 실패함)",
+		"IAM & Admin → IAM → 해당 SA에 실제 사용할 리소스 권한 부여 (예: roles/compute.admin)",
 		"SA 이메일을 CspRole.iam_identifier에 등록",
 	},
 	DocsRef: "mcmp-workflow/mc-iam-manager/design/CSP-ADMIN-WORKFLOW.md#step-5",
