@@ -645,14 +645,16 @@ func (s *CspValidationService) validateGCPWithOIDC(ctx context.Context, userID u
 	}
 
 	// Step 3: Keycloak OIDC 토큰 발급
-	var accessToken string
+	// GCP WIF STS는 단일 문자열 aud를 요구하므로 Access Token(aud="account")이 아니라
+	// ID Token(aud=OIDC 클라이언트 ID)을 사용해야 한다 — Alibaba OIDC(OI-1)와 동일한 이유.
+	var idToken string
 	if !stepRunner(steps, 2, nil, func() (string, error) {
 		jwt, err := s.keycloakService.GetImpersonationTokenByServiceAccount(ctx)
 		if err != nil {
 			return "", fmt.Errorf("Keycloak OIDC 토큰 발급 실패: %v", err)
 		}
-		accessToken = jwt.AccessToken
-		return fmt.Sprintf("OIDC JWT 발급 완료 (len=%d)", len(accessToken)), nil
+		idToken = jwt.IDToken
+		return fmt.Sprintf("OIDC JWT 발급 완료 (len=%d)", len(idToken)), nil
 	}) {
 		return buildFailedResponse(cspType, authMethod, 3, steps), nil
 	}
@@ -661,7 +663,7 @@ func (s *CspValidationService) validateGCPWithOIDC(ctx context.Context, userID u
 	gcpCredService := s.resolveGcpCredService()
 	var federatedToken string
 	if !stepRunner(steps, 3, gcpStsRemediation, func() (string, error) {
-		token, err := gcpCredService.ExchangeToken(ctx, wifProvider, accessToken, "jwt")
+		token, err := gcpCredService.ExchangeToken(ctx, wifProvider, idToken, "jwt")
 		if err != nil {
 			return "", fmt.Errorf("GCP STS 토큰 교환 실패: %v — WIF Pool/Provider 설정 확인", err)
 		}
