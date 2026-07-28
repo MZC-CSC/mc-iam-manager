@@ -13,10 +13,19 @@ const (
 
 // ValidationStep 단일 검증 단계 결과
 type ValidationStep struct {
-	Step   int                  `json:"step"`   // 순번 (1부터)
-	Name   string               `json:"name"`   // 단계명
-	Status ValidationStepStatus `json:"status"` // ok | failed | skipped
-	Detail string               `json:"detail"` // 수행 내역 또는 오류 안내 (skipped면 "")
+	Step        int                  `json:"step"`                  // 순번 (1부터)
+	Name        string               `json:"name"`                  // 단계명
+	Status      ValidationStepStatus `json:"status"`                 // ok | failed | skipped
+	Detail      string               `json:"detail"`                 // 수행 내역 또는 오류 안내 (skipped면 "")
+	Remediation *RemediationGuide    `json:"remediation,omitempty"` // failed일 때만, CSP 콘솔에서의 조치 방법
+}
+
+// RemediationGuide 검증 실패 단계에 대한 구조화된 설정 방안
+type RemediationGuide struct {
+	Summary      string   `json:"summary"`                // 한 줄 요약
+	ConsoleSteps []string `json:"consoleSteps,omitempty"` // CSP 콘솔/CLI 조작 순서
+	Template     string   `json:"template,omitempty"`     // 선택: Trust Policy JSON 등 복사-붙여넣기 템플릿
+	DocsRef      string   `json:"docsRef,omitempty"`      // 선택: 참고 문서 링크
 }
 
 // CspValidationRequest 검증 요청
