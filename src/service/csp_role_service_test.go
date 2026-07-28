@@ -155,3 +155,67 @@ func TestUpdateCspRole_PersistsCspIdpConfigID(t *testing.T) {
 	require.NotNil(t, updated.CspIdpConfigID)
 	assert.Equal(t, idpConfigID, *updated.CspIdpConfigID)
 }
+
+// TestUpdateCspRole_PersistsIdentifierFields: UpdateCspRole이 Name/Description/
+// ExtendedConfig/CspIdpConfigID만 반영하고 IdpIdentifier/IamIdentifier/IamRoleId/Path는
+// 무시하던 버그(콘솔 CSP Role Edit 저장 시 이 4필드가 항상 유실) 회귀 방지.
+func TestUpdateCspRole_PersistsIdentifierFields(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	created, err := svc.CreateCspRole(&model.CreateCspRoleRequest{
+		CspRoleName:   "mcmp-admin-identifiers",
+		CspType:       "gcp",
+		AuthMethod:    constants.AuthMethodOIDC,
+		IdpIdentifier: "//iam.googleapis.com/projects/x/locations/global/workloadIdentityPools/p/providers/pr",
+		IamIdentifier: "sa@project.iam.gserviceaccount.com",
+	})
+	require.NoError(t, err)
+
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
+		CspRoleName:   created.Name,
+		IdpIdentifier: "//iam.googleapis.com/projects/x/locations/global/workloadIdentityPools/p/providers/pr-updated",
+		IamIdentifier: "sa-updated@project.iam.gserviceaccount.com",
+		IamRoleId:     "role-id-updated",
+		Path:          "/updated/",
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.GetCspRoleByID(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "//iam.googleapis.com/projects/x/locations/global/workloadIdentityPools/p/providers/pr-updated", updated.IdpIdentifier)
+	assert.Equal(t, "sa-updated@project.iam.gserviceaccount.com", updated.IamIdentifier)
+	assert.Equal(t, "role-id-updated", updated.IamRoleId)
+	assert.Equal(t, "/updated/", updated.Path)
+}
+
+// TestUpdateCspRole_EmptyIdentifierFields_PreservesExisting: 요청에 identifier
+// 필드가 비어 있으면(옵셔널 필드 미전달) 기존 값을 보존해야 한다 — ExtendedConfig/
+// CspIdpConfigID와 동일한 "미전달 시 유지" 정책.
+func TestUpdateCspRole_EmptyIdentifierFields_PreservesExisting(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	created, err := svc.CreateCspRole(&model.CreateCspRoleRequest{
+		CspRoleName:   "mcmp-admin-preserve",
+		CspType:       "gcp",
+		AuthMethod:    constants.AuthMethodOIDC,
+		IdpIdentifier: "//iam.googleapis.com/projects/x/locations/global/workloadIdentityPools/p/providers/pr",
+		IamIdentifier: "sa@project.iam.gserviceaccount.com",
+		IamRoleId:     "role-id-original",
+		Path:          "/original/",
+	})
+	require.NoError(t, err)
+
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
+		CspRoleName: created.Name,
+		Description: "설명만 변경",
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.GetCspRoleByID(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "설명만 변경", updated.Description)
+	assert.Equal(t, created.IdpIdentifier, updated.IdpIdentifier)
+	assert.Equal(t, created.IamIdentifier, updated.IamIdentifier)
+	assert.Equal(t, created.IamRoleId, updated.IamRoleId)
+	assert.Equal(t, created.Path, updated.Path)
+}

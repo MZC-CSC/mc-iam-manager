@@ -585,6 +585,18 @@ func (s *CspRoleService) UpdateCspRole(id uint, req *model.CreateCspRoleRequest)
 	}
 	existingRole.Name = req.CspRoleName
 	existingRole.Description = req.Description
+	if req.IdpIdentifier != "" {
+		existingRole.IdpIdentifier = req.IdpIdentifier
+	}
+	if req.IamIdentifier != "" {
+		existingRole.IamIdentifier = req.IamIdentifier
+	}
+	if req.IamRoleId != "" {
+		existingRole.IamRoleId = req.IamRoleId
+	}
+	if req.Path != "" {
+		existingRole.Path = req.Path
+	}
 	if len(req.ExtendedConfig) > 0 {
 		existingRole.ExtendedConfig = req.ExtendedConfig
 	}
