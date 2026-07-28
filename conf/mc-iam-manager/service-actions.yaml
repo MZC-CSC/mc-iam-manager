@@ -1204,8 +1204,8 @@ serviceActions:
             description: Update CSP policy details
         updateCspRole:
             method: put
-            resourcePath: /api/roles/csp-roles/id/{roleId}
-            description: Update role information
+            resourcePath: /api/roles/csp/id/{roleId}
+            description: Update CSP role record (idp/iam identifiers, description, extended config)
         updateGroupWorkspaceRole:
             method: put
             resourcePath: /api/groups/id/{groupId}/workspaces/{workspaceId}
