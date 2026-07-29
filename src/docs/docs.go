@@ -3061,6 +3061,72 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "그룹에서 사용자 목록을 일괄 제거합니다. DB + Keycloak 그룹 동기화.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "groups"
+                ],
+                "summary": "그룹에서 사용자 일괄 제거 (Keycloak 동기화 포함)",
+                "operationId": "removeGroupUsers",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "그룹 ID",
+                        "name": "groupId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "사용자 일괄 제거 요청",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.RemoveGroupUsersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/groups/id/{groupId}/users/{userId}": {
@@ -7157,78 +7223,6 @@ const docTemplate = `{
             }
         },
         "/api/roles/csp-roles/id/{roleId}": {
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Update role information",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "roles"
-                ],
-                "summary": "Update csp role",
-                "operationId": "updateCspRole",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Role ID",
-                        "name": "roleId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Role Info",
-                        "name": "role",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/model.CreateRoleRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/model.RoleMaster"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
             "delete": {
                 "security": [
                     {
@@ -7339,6 +7333,71 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/roles/csp-roles/master/id/{roleId}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "RoleSub.RoleType이 csp인 RoleMaster(플랫폼 역할 정의: name/description/parentId)를 수정합니다.\nCSP 클라우드 측 역할 레코드(mcmp_role_csp_roles)를 수정하는 UpdateCspRole(/api/roles/csp/id/{roleId})과는 다른 리소스입니다 — 혼동 방지를 위해 operationId를 updateCspRoleMaster로 분리했습니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "roles"
+                ],
+                "summary": "Update CSP-type platform role (RoleMaster)",
+                "operationId": "updateCspRoleMaster",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSP-type Platform Role ID",
+                        "name": "roleId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "CSP-type Role Info",
+                        "name": "role",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.CreateRoleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.RoleMaster"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/roles/csp/id/{roleId}": {
             "get": {
                 "security": [
@@ -7376,6 +7435,69 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "CspRole(mcmp_role_csp_roles) 레코드를 수정합니다. Name/Description/ExtendedConfig를 반영합니다.\nAWS의 경우 클라우드 측 리소스는 건드리지 않고 DB만 갱신합니다(SAML saml_client_id 등 설정용).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "roles"
+                ],
+                "summary": "Update CSP role",
+                "operationId": "updateCspRole",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSP Role ID",
+                        "name": "roleId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "CSP Role Info",
+                        "name": "role",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.CreateCspRoleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.CspRole"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7956,6 +8078,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/roles/mappings/platform-roles/id/{roleId}/groups": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "특정 플랫폼 역할이 할당된 그룹 목록을 조회합니다 (역할→그룹 역방향 조회).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "roles"
+                ],
+                "summary": "특정 Platform Role이 부여된 그룹 목록 조회",
+                "operationId": "listGroupsByPlatformRole",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "역할 ID",
+                        "name": "roleId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.GroupPlatformRoleResponse"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/roles/mappings/platform-roles/users/list": {
             "post": {
                 "security": [
@@ -8065,6 +8234,53 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/roles/mappings/workspace-roles/id/{roleId}/groups": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "특정 워크스페이스 역할이 할당된 그룹 목록을 조회합니다 (역할→그룹 역방향 조회).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "roles"
+                ],
+                "summary": "특정 Workspace Role이 부여된 그룹 목록 조회",
+                "operationId": "listGroupsByWorkspaceRole",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "역할 ID",
+                        "name": "roleId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.GroupWorkspaceRoleResponse"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8331,6 +8547,69 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update the details of an existing platform role (RoleMaster: name/description/parentId, RoleSub type list)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "roles"
+                ],
+                "summary": "Update platform role",
+                "operationId": "updatePlatformRole",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Platform Role ID",
+                        "name": "roleId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Platform Role Info",
+                        "name": "role",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.CreateRoleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.RoleMaster"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8732,6 +9011,69 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update the details of an existing workspace role (RoleMaster: name/description/parentId, RoleSub type list)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "roles"
+                ],
+                "summary": "Update workspace role",
+                "operationId": "updateWorkspaceRole",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace Role ID",
+                        "name": "roleId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Workspace Role Info",
+                        "name": "role",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.CreateRoleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.RoleMaster"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -12815,11 +13157,6 @@ const docTemplate = `{
                 "RoleTypePlatform": "플랫폼 역할",
                 "RoleTypeWorkspace": "워크스페이스 역할"
             },
-            "x-enum-descriptions": [
-                "플랫폼 역할",
-                "워크스페이스 역할",
-                "CSP 역할"
-            ],
             "x-enum-varnames": [
                 "RoleTypePlatform",
                 "RoleTypeWorkspace",
@@ -13466,6 +13803,10 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "cspIdpConfigId": {
+                    "description": "이 CspRole이 사용할 CspIdpConfig(OIDC/SAML 등 트러스트 설정) 연결",
+                    "type": "integer"
+                },
                 "cspRoleName": {
                     "description": "csp의 RoleName. 여러 role이 있기때문에 csp에 정의한 role로 구분하기 위해 사용",
                     "type": "string"
@@ -13475,6 +13816,10 @@ const docTemplate = `{
                 },
                 "description": {
                     "type": "string"
+                },
+                "extendedConfig": {
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "iamIdentifier": {
                     "type": "string"
@@ -14677,11 +15022,6 @@ const docTemplate = `{
                 "PolicyTypeInline": "인라인 정책 (역할에 직접 포함)",
                 "PolicyTypeManaged": "관리형 정책 (독립 정책)"
             },
-            "x-enum-descriptions": [
-                "인라인 정책 (역할에 직접 포함)",
-                "관리형 정책 (독립 정책)",
-                "사용자 정의 정책"
-            ],
             "x-enum-varnames": [
                 "PolicyTypeInline",
                 "PolicyTypeManaged",
@@ -14861,6 +15201,45 @@ const docTemplate = `{
                 },
                 "nsId": {
                     "type": "string"
+                }
+            }
+        },
+        "model.RemediationGuide": {
+            "type": "object",
+            "properties": {
+                "consoleSteps": {
+                    "description": "CSP 콘솔/CLI 조작 순서",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "docsRef": {
+                    "description": "선택: 참고 문서 링크",
+                    "type": "string"
+                },
+                "summary": {
+                    "description": "한 줄 요약",
+                    "type": "string"
+                },
+                "template": {
+                    "description": "선택: Trust Policy JSON 등 복사-붙여넣기 템플릿",
+                    "type": "string"
+                }
+            }
+        },
+        "model.RemoveGroupUsersRequest": {
+            "type": "object",
+            "required": [
+                "user_ids"
+            ],
+            "properties": {
+                "user_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "integer"
+                    }
                 }
             }
         },
@@ -15529,6 +15908,14 @@ const docTemplate = `{
                 "name": {
                     "description": "단계명",
                     "type": "string"
+                },
+                "remediation": {
+                    "description": "failed일 때만, CSP 콘솔에서의 조치 방법",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.RemediationGuide"
+                        }
+                    ]
                 },
                 "status": {
                     "description": "ok | failed | skipped",
