@@ -914,8 +914,8 @@ func (h *RoleHandler) CreateCspRole(c echo.Context) error {
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/roles/csp/id/{roleId} [put]
-// @Id updateCspRoleRecord
-func (h *RoleHandler) UpdateCspRoleRecord(c echo.Context) error {
+// @Id updateCspRole
+func (h *RoleHandler) UpdateCspRole(c echo.Context) error {
 	roleIDInt, err := util.StringToUint(c.Param("roleId"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "잘못된 csp 역할 ID 형식입니다"})
@@ -1155,37 +1155,157 @@ func (h *RoleHandler) GetCspRoleByName(c echo.Context) error {
 	return c.JSON(http.StatusOK, role)
 }
 
-// @Summary Update csp role
-// @Description Update role information
+// @Summary Update platform role
+// @Description Update the details of an existing platform role (RoleMaster: name/description/parentId, RoleSub type list)
 // @Tags roles
 // @Accept json
 // @Produce json
-// @Param roleId path string true "Role ID"
-// @Param role body model.CreateRoleRequest true "Role Info"
+// @Param roleId path string true "Platform Role ID"
+// @Param role body model.CreateRoleRequest true "Platform Role Info"
 // @Success 200 {object} model.RoleMaster
 // @Failure 400 {object} map[string]string
-// @Failure 404 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
-// @Router /api/roles/csp-roles/id/{roleId} [put]
-// @Id updateCspRole
-func (h *RoleHandler) UpdateCspRole(c echo.Context) error {
-	roleType := constants.RoleTypeCSP
+// @Router /api/roles/platform-roles/id/{roleId} [put]
+// @Id updatePlatformRole
+func (h *RoleHandler) UpdatePlatformRole(c echo.Context) error {
+	roleIDInt, err := util.StringToUint(c.Param("roleId"))
+	if err != nil {
+		log.Printf("잘못된 platform 역할 ID 형식: %s", c.Param("roleId"))
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "잘못된 역할 ID 형식입니다"})
+	}
+
+	// RoleSub는 RoleMaster와 별도 테이블이라 요청 바디가 아닌 DB의 기존 RoleSub를 기준으로
+	// 이 roleId가 실제로 platform 타입인지 검증한다 (요청 바디의 RoleTypes만 보면 다른 타입을
+	// 함께 지정해 다른 엔드포인트의 역할까지 건드릴 수 있음).
+	existing, err := h.roleService.GetRoleByID(roleIDInt, constants.RoleTypePlatform)
+	if err != nil {
+		log.Printf("platform 역할 조회 실패 - ID: %d, 에러: %v", roleIDInt, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 조회 실패: %v", err)})
+	}
+	if existing == nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "platform 타입의 해당 역할을 찾을 수 없습니다"})
+	}
+
+	var req model.CreateRoleRequest
+	if err := c.Bind(&req); err != nil {
+		log.Printf("platform 역할 수정 요청 바인딩 실패 - 에러: %v", err)
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "잘못된 요청 형식입니다"})
+	}
+
+	if err := c.Validate(&req); err != nil {
+		log.Printf("platform 역할 수정 입력값 검증 실패 - 에러: %v", err)
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("입력값 검증 실패: %v", err)})
+	}
+
+	role := model.RoleMaster{
+		ID:          roleIDInt,
+		Name:        req.Name,
+		Description: req.Description,
+		ParentID:    req.ParentID,
+	}
+
+	updatedRole, err := h.roleService.UpdateRoleWithSubs(role, req.RoleTypes)
+	if err != nil {
+		log.Printf("platform 역할 수정 실패 - ID: %d, 에러: %v", roleIDInt, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 수정 실패: %v", err)})
+	}
+
+	log.Printf("platform 역할 수정 성공 - ID: %d", roleIDInt)
+	return c.JSON(http.StatusOK, updatedRole)
+}
+
+// @Summary Update workspace role
+// @Description Update the details of an existing workspace role (RoleMaster: name/description/parentId, RoleSub type list)
+// @Tags roles
+// @Accept json
+// @Produce json
+// @Param roleId path string true "Workspace Role ID"
+// @Param role body model.CreateRoleRequest true "Workspace Role Info"
+// @Success 200 {object} model.RoleMaster
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Security BearerAuth
+// @Router /api/roles/workspace-roles/id/{roleId} [put]
+// @Id updateWorkspaceRole
+func (h *RoleHandler) UpdateWorkspaceRole(c echo.Context) error {
+	roleIDInt, err := util.StringToUint(c.Param("roleId"))
+	if err != nil {
+		log.Printf("잘못된 workspace 역할 ID 형식: %s", c.Param("roleId"))
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "잘못된 역할 ID 형식입니다"})
+	}
+
+	existing, err := h.roleService.GetRoleByID(roleIDInt, constants.RoleTypeWorkspace)
+	if err != nil {
+		log.Printf("workspace 역할 조회 실패 - ID: %d, 에러: %v", roleIDInt, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 조회 실패: %v", err)})
+	}
+	if existing == nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "workspace 타입의 해당 역할을 찾을 수 없습니다"})
+	}
+
+	var req model.CreateRoleRequest
+	if err := c.Bind(&req); err != nil {
+		log.Printf("workspace 역할 수정 요청 바인딩 실패 - 에러: %v", err)
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "잘못된 요청 형식입니다"})
+	}
+
+	if err := c.Validate(&req); err != nil {
+		log.Printf("workspace 역할 수정 입력값 검증 실패 - 에러: %v", err)
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("입력값 검증 실패: %v", err)})
+	}
+
+	role := model.RoleMaster{
+		ID:          roleIDInt,
+		Name:        req.Name,
+		Description: req.Description,
+		ParentID:    req.ParentID,
+	}
+
+	updatedRole, err := h.roleService.UpdateRoleWithSubs(role, req.RoleTypes)
+	if err != nil {
+		log.Printf("workspace 역할 수정 실패 - ID: %d, 에러: %v", roleIDInt, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 수정 실패: %v", err)})
+	}
+
+	log.Printf("workspace 역할 수정 성공 - ID: %d", roleIDInt)
+	return c.JSON(http.StatusOK, updatedRole)
+}
+
+// @Summary Update CSP-type platform role (RoleMaster)
+// @Description RoleSub.RoleType이 csp인 RoleMaster(플랫폼 역할 정의: name/description/parentId)를 수정합니다.
+// @Description CSP 클라우드 측 역할 레코드(mcmp_role_csp_roles)를 수정하는 UpdateCspRole(/api/roles/csp/id/{roleId})과는 다른 리소스입니다 — 혼동 방지를 위해 operationId를 updateCspRoleMaster로 분리했습니다.
+// @Tags roles
+// @Accept json
+// @Produce json
+// @Param roleId path string true "CSP-type Platform Role ID"
+// @Param role body model.CreateRoleRequest true "CSP-type Role Info"
+// @Success 200 {object} model.RoleMaster
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Security BearerAuth
+// @Router /api/roles/csp-roles/master/id/{roleId} [put]
+// @Id updateCspRoleMaster
+func (h *RoleHandler) UpdateCspRoleMaster(c echo.Context) error {
+	roleIDInt, err := util.StringToUint(c.Param("roleId"))
+	if err != nil {
+		log.Printf("잘못된 csp 역할 ID 형식: %s", c.Param("roleId"))
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "잘못된 역할 ID 형식입니다"})
+	}
+
+	existing, err := h.roleService.GetRoleByID(roleIDInt, constants.RoleTypeCSP)
+	if err != nil {
+		log.Printf("csp 역할 조회 실패 - ID: %d, 에러: %v", roleIDInt, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 조회 실패: %v", err)})
+	}
+	if existing == nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "csp 타입의 해당 역할을 찾을 수 없습니다"})
+	}
 
 	var req model.CreateRoleRequest
 	if err := c.Bind(&req); err != nil {
 		log.Printf("csp 역할 수정 요청 바인딩 실패 - 에러: %v", err)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "잘못된 요청 형식입니다"})
-	}
-
-	roleIDInt, err := util.StringToUint(c.Param("roleId"))
-	if err != nil {
-		log.Printf("잘못된 csp 역할 ID 형식: %s", c.Param("roleId"))
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "csp 역할 ID 형식입니다"})
-	}
-
-	if !util.CheckValueInArrayIAMRoleType(req.RoleTypes, roleType) { //roleType이 csp인지 확인
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "역할 타입이 일치하지 않습니다"})
 	}
 
 	if err := c.Validate(&req); err != nil {

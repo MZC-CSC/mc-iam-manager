@@ -324,6 +324,7 @@ func main() {
 		roles.DELETE("/platform-roles/id/:roleId", roleHandler.DeletePlatformRole) //단건삭제
 		roles.GET("/platform-roles/id/:roleId", roleHandler.GetPlatformRoleByID)
 		roles.GET("/platform-roles/name/:roleName", roleHandler.GetPlatformRoleByName)
+		roles.PUT("/platform-roles/id/:roleId", roleHandler.UpdatePlatformRole)
 
 		roles.POST("/workspace-roles/list", roleHandler.ListWorkspaceRoles)
 		roles.POST("/workspace-roles", roleHandler.CreateWorkspaceRole)
@@ -331,15 +332,17 @@ func main() {
 		roles.DELETE("/workspace-roles/id/:roleId", roleHandler.DeleteWorkspaceRole) //단건삭제
 		roles.GET("/workspace-roles/id/:roleId", roleHandler.GetWorkspaceRoleByID)
 		roles.GET("/workspace-roles/name/:roleName", roleHandler.GetWorkspaceRoleByName)
+		roles.PUT("/workspace-roles/id/:roleId", roleHandler.UpdateWorkspaceRole)
 
 		roles.POST("/csp-roles/list", roleHandler.ListCspRoleMappings)
 		roles.GET("/csp-roles/id/:roleId", roleHandler.GetCspRoleMappings)
+		roles.PUT("/csp-roles/master/id/:roleId", roleHandler.UpdateCspRoleMaster)
 		roles.POST("/csp/list", roleHandler.ListCSPRoles)
 		roles.POST("/csp", roleHandler.CreateCspRole)
 		roles.POST("/csp/batch", roleHandler.CreateCspRoles)
 		//roles.DELETE("/csp", roleHandler.DeleteCspRole)
 		roles.DELETE("/csp/id/:roleId", roleHandler.DeleteCspRole) //단건삭제
-		roles.PUT("/csp/id/:roleId", roleHandler.UpdateCspRoleRecord)
+		roles.PUT("/csp/id/:roleId", roleHandler.UpdateCspRole)
 		roles.GET("/csp/id/:roleId", roleHandler.GetCspRoleByID)
 		roles.GET("/csp/name/:roleName", roleHandler.GetCspRoleByName)
 
