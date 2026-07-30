@@ -219,3 +219,55 @@ func TestUpdateCspRole_EmptyIdentifierFields_PreservesExisting(t *testing.T) {
 	assert.Equal(t, created.IamRoleId, updated.IamRoleId)
 	assert.Equal(t, created.Path, updated.Path)
 }
+
+// TestUpdateCspRole_EmptyName_PreservesExisting: IAM-BUG-018 회귀 방지.
+// 콘솔 Edit 모달은 Name을 읽기 전용으로 취급해 저장 요청에 cspRoleName을
+// 아예 보내지 않는다(빈 문자열). CspRoleName이 빈 값이면 기존 Name을
+// 보존해야 하며, 데이터 유실(빈 문자열로 덮어쓰기)이 발생하면 안 된다.
+func TestUpdateCspRole_EmptyName_PreservesExisting(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	created, err := svc.CreateCspRole(&model.CreateCspRoleRequest{
+		CspRoleName: "original-name-must-survive",
+		CspType:     "gcp",
+		AuthMethod:  constants.AuthMethodOIDC,
+	})
+	require.NoError(t, err)
+	originalName := created.Name
+
+	// 콘솔 Edit 모달과 동일하게 cspRoleName 자체를 보내지 않음(빈 문자열)
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
+		Description:   "updated description",
+		IdpIdentifier: "updated-idp",
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.GetCspRoleByID(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, originalName, updated.Name, "빈 cspRoleName으로 수정해도 기존 Name이 보존되어야 함")
+	assert.Equal(t, "updated description", updated.Description)
+	assert.Equal(t, "updated-idp", updated.IdpIdentifier)
+}
+
+// TestUpdateCspRole_NonEmptyName_Updates: cspRoleName이 실제로 전달되면
+// 정상적으로 Name이 반영되어야 한다(가드가 과도하게 막지 않는지 확인).
+func TestUpdateCspRole_NonEmptyName_Updates(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	created, err := svc.CreateCspRole(&model.CreateCspRoleRequest{
+		CspRoleName: "before-rename",
+		CspType:     "gcp",
+		AuthMethod:  constants.AuthMethodOIDC,
+	})
+	require.NoError(t, err)
+
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
+		CspRoleName: "after-rename",
+		Description: "d",
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.GetCspRoleByID(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "after-rename", updated.Name)
+}

@@ -583,8 +583,12 @@ func (s *CspRoleService) UpdateCspRole(id uint, req *model.CreateCspRoleRequest)
 	if err != nil {
 		return fmt.Errorf("failed to get existing role: %v", err)
 	}
-	existingRole.Name = req.CspRoleName
-	existingRole.Description = req.Description
+	if req.CspRoleName != "" {
+		existingRole.Name = req.CspRoleName
+	}
+	if req.Description != "" {
+		existingRole.Description = req.Description
+	}
 	if req.IdpIdentifier != "" {
 		existingRole.IdpIdentifier = req.IdpIdentifier
 	}
