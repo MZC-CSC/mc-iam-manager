@@ -796,12 +796,12 @@ func (h *RoleHandler) CreatePlatformRole(c echo.Context) error {
 
 	// Create RoleSubs
 	roleSubs := make([]model.RoleSub, len(req.RoleTypes))
-	for _, roleType := range req.RoleTypes {
+	for i, roleType := range req.RoleTypes {
 		log.Printf("roleType: %s", roleType)
-		roleSubs = append(roleSubs, model.RoleSub{
+		roleSubs[i] = model.RoleSub{
 			RoleID:   role.ID,
 			RoleType: constants.RoleTypePlatform,
-		})
+		}
 	}
 
 	// Create role and subtypes
