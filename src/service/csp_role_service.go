@@ -614,8 +614,45 @@ func (s *CspRoleService) UpdateCspRole(id uint, req *model.CreateCspRoleRequest)
 }
 
 // DeleteCspRole CSP 역할을 삭제합니다.
+// DeleteCspRole CspRole(mcmp_role_csp_roles) 레코드를 삭제합니다.
+// CreateCspRole과 대칭되는 CspType 분기: AWS는 실제 클라우드 Role도 함께 삭제하고,
+// 그 외에는 DB 레코드만 정리합니다. 이 레코드를 참조하는 RoleMasterCspRoleMapping은
+// 호출 전에 별도로 정리되어 있어야 한다(핸들러에서 DeleteRoleCspRoleMappingsByCspRoleID 선행 호출).
 func (s *CspRoleService) DeleteCspRole(id uint) error {
-	return s.cspRoleRepo.DeleteCSPRole(fmt.Sprintf("%d", id))
+	role, err := s.cspRoleRepo.GetRoleByID(id)
+	if err != nil {
+		return fmt.Errorf("failed to find CSP role: %w", err)
+	}
+
+	if role.CspType == "aws" {
+		if err := s.deleteAwsIamRole(role.Name); err != nil {
+			return err
+		}
+	}
+
+	return s.cspRoleRepo.DeleteCspRoleRecord(id)
+}
+
+// deleteAwsIamRole AWS IAM Role을 삭제합니다. (private, AWS 전용)
+func (s *CspRoleService) deleteAwsIamRole(roleName string) error {
+	issuedBy := "system"
+	credential, err := s.tempCredentialRepo.GetOrCreateValidCredential("aws", "oidc", "ap-northeast-2", nil, issuedBy, func() (*model.TempCredential, error) {
+		return s.createNewAwsCredential(issuedBy)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get or create valid credential: %v", err)
+	}
+
+	awsCfg, err := s.createAwsConfigWithTempCredential(credential)
+	if err != nil {
+		return fmt.Errorf("failed to create AWS config with temp credential: %v", err)
+	}
+
+	awsIamClient := iam.NewFromConfig(awsCfg)
+	if _, err := awsIamClient.DeleteRole(context.TODO(), &iam.DeleteRoleInput{RoleName: aws.String(roleName)}); err != nil {
+		return fmt.Errorf("failed to delete IAM role: %v", err)
+	}
+	return nil
 }
 
 // CleanupExpiredCredentials 만료된 임시 자격 증명을 정리합니다.
@@ -628,16 +665,6 @@ func (s *CspRoleService) UpdateCSPRole(role *model.CspRole) error {
 	err := s.cspRoleRepo.UpdateCSPRole(role)
 	if err != nil {
 		log.Printf("Failed to update CSP role: %v", err)
-		return err
-	}
-	return nil
-}
-
-// DeleteCSPRole CSP 역할을 삭제합니다.
-func (s *CspRoleService) DeleteCSPRole(id string) error {
-	err := s.cspRoleRepo.DeleteCSPRole(id)
-	if err != nil {
-		log.Printf("Failed to delete CSP role: %v", err)
 		return err
 	}
 	return nil

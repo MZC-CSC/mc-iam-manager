@@ -416,6 +416,13 @@ func (r *RoleRepository) DeleteRoleCspRoleMappings(roleID uint) error {
 		Delete(&model.RoleMasterCspRoleMapping{}).Error
 }
 
+// DeleteRoleCspRoleMappingsByCspRoleID 해당 csp_role_id를 참조하는 모든 매핑을 role_id 무관하게 삭제
+// (CspRole 레코드 자체를 삭제하기 전, 그 레코드를 참조하는 매핑을 먼저 끊어내는 용도)
+func (r *RoleRepository) DeleteRoleCspRoleMappingsByCspRoleID(cspRoleID uint) error {
+	return r.db.Where("csp_role_id = ?", cspRoleID).
+		Delete(&model.RoleMasterCspRoleMapping{}).Error
+}
+
 // CreateWorkspaceRoleCspRoleMapping 워크스페이스 역할-CSP 역할 매핑 생성
 // RoleSub = 'workspace' 가 없으면 생성하고 RoleSub = 'csp' 가 없으면 생성
 func (r *RoleRepository) CreateWorkspaceRoleCspRoleMapping(req *model.CreateCspRolesMappingRequest) error {

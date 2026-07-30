@@ -336,7 +336,9 @@ func main() {
 
 		roles.POST("/csp-roles/list", roleHandler.ListCspRoleMappings)
 		roles.GET("/csp-roles/id/:roleId", roleHandler.GetCspRoleMappings)
+		roles.POST("/csp-roles/master", roleHandler.CreateCspRoleMaster)
 		roles.PUT("/csp-roles/master/id/:roleId", roleHandler.UpdateCspRoleMaster)
+		roles.DELETE("/csp-roles/master/id/:roleId", roleHandler.DeleteCspRoleMaster)
 		roles.POST("/csp/list", roleHandler.ListCSPRoles)
 		roles.POST("/csp", roleHandler.CreateCspRole)
 		roles.POST("/csp/batch", roleHandler.CreateCspRoles)

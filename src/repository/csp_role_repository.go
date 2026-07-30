@@ -196,40 +196,23 @@ func (r *CspRoleRepository) UpdateCSPRole(role *model.CspRole) error {
 }
 
 // Delete AWS IAM Role을 삭제합니다.
-func (r *CspRoleRepository) DeleteCSPRole(id string) error {
-	// 1. DB에서 역할 조회 (role_master 테이블 조인)
-	var role model.CspRole
-	if err := r.db.Joins("JOIN mcmp_role_csp_role_mappings ON mcmp_role_csp_role_mappings.csp_role_id = mcmp_role_csps.id").
-		Where("mcmp_role_csp_role_mappings.csp_role_id = ?", id).
-		First(&role).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return fmt.Errorf("CSP 역할을 찾을 수 없습니다: %v", err)
+// DeleteCspRoleRecord CspRole(mcmp_role_csp_roles) 레코드를 cascade 삭제한다.
+// 이 레코드를 참조하는 RoleMasterCspRoleMapping은 호출 전에 별도로 정리되어야 한다
+// (RoleRepository.DeleteRoleCspRoleMappingsByCspRoleID). 실제 클라우드 리소스 삭제는
+// CspType별로 분기가 필요해 서비스 레이어(CspRoleService.DeleteCspRole)에서 처리한다.
+func (r *CspRoleRepository) DeleteCspRoleRecord(id uint) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("csp_role_id = ?", id).Delete(&model.CspRolePolicyMapping{}).Error; err != nil {
+			return fmt.Errorf("CSP 역할 정책 매핑 삭제 실패: %w", err)
 		}
-		return fmt.Errorf("DB 조회 실패: %v", err)
-	}
-
-	// 2. AWS IAM Role 삭제
-	input := &iam.DeleteRoleInput{
-		RoleName: aws.String(role.Name),
-	}
-
-	awsIamClient, err := r.getAwsIamClient("system")
-	if err != nil {
-		return fmt.Errorf("failed to get AWS IAM client: %v", err)
-	}
-
-	_, err = awsIamClient.DeleteRole(context.TODO(), input)
-	if err != nil {
-		return fmt.Errorf("failed to delete IAM role: %v", err)
-	}
-
-	// 3. DB에서도 삭제
-	if err := r.db.Delete(&role).Error; err != nil {
-		return fmt.Errorf("failed to delete role from database: %v", err)
-	}
-
-	log.Printf("DeleteRole API Response: [RoleName: %s] - Successfully deleted", role.Name)
-	return nil
+		if err := tx.Where("csp_role_id = ?", fmt.Sprintf("%d", id)).Delete(&model.CspRolePermission{}).Error; err != nil {
+			return fmt.Errorf("CSP 역할 권한 삭제 실패: %w", err)
+		}
+		if err := tx.Where("id = ?", id).Delete(&model.CspRole{}).Error; err != nil {
+			return fmt.Errorf("CSP 역할 삭제 실패: %w", err)
+		}
+		return nil
+	})
 }
 
 func getRoleDescription(role types.Role) string {
