@@ -129,10 +129,13 @@ func (h *RoleHandler) CreateRole(c echo.Context) error {
 			}
 
 			// Store created CSP role information
+			// AuthMethod는 요청 원본(cspRole)에서 그대로 전달 — 누락 시 CreateRoleWithAllDependencies가
+			// OIDC로 기본 반영하지만, SAML 등으로 생성된 CSP 역할은 그 값이 매핑에도 반영되어야 한다.
 			createdCspRoles = append(createdCspRoles, model.CreateCspRoleRequest{
 				ID:          util.UintToString(createdCspRole.ID),
 				CspRoleName: createdCspRole.Name,
 				CspType:     createdCspRole.CspType,
+				AuthMethod:  cspRole.AuthMethod,
 			})
 		}
 	}
@@ -343,10 +346,11 @@ func (h *RoleHandler) UpdateRole(c echo.Context) error {
 			}
 
 			// Create new mapping
+			// AuthMethod가 비어있으면 CreateRoleCspRoleMapping(repository)이 OIDC로 기본 반영한다.
 			roleCspRoleMappingRequest := &model.CreateRoleMasterCspRoleMappingRequest{
 				RoleID:      roleId,
 				CspRoleID:   cspRole.ID,
-				AuthMethod:  constants.AuthMethodOIDC,
+				AuthMethod:  cspRole.AuthMethod,
 				Description: req.Description,
 			}
 

@@ -488,8 +488,10 @@ func (r *RoleRepository) FindRoleMasterCspRoleMappings(req *model.RoleMasterCspR
 		query = query.Where("csp_role_id = ?", req.CspRoleID)
 	}
 
-	// 현재는 OIDC로 고정. TODO : 선택하는 로직 추가 필요
-	query = query.Where("auth_method = ?", constants.AuthMethodOIDC)
+	// authMethod가 비어있지 않다면 조건 추가
+	if req.AuthMethod != "" {
+		query = query.Where("auth_method = ?", req.AuthMethod)
+	}
 
 	if err := query.Find(&mappings).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -533,8 +535,10 @@ func (r *RoleRepository) FindWorkspaceRoleCspRoleMappings(req *model.RoleMasterC
 		query = query.Where("csp_role_id = ?", req.CspRoleID)
 	}
 
-	// authMethod 는 OIDC로 고정. TODO : 선택하는 로직 추가 필요
-	query = query.Where("auth_method = ?", constants.AuthMethodOIDC)
+	// authMethod가 비어있지 않다면 조건 추가
+	if req.AuthMethod != "" {
+		query = query.Where("auth_method = ?", req.AuthMethod)
+	}
 
 	if err := query.Find(&mappings).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
