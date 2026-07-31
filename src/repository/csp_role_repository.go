@@ -205,9 +205,9 @@ func (r *CspRoleRepository) DeleteCspRoleRecord(id uint) error {
 		if err := tx.Where("csp_role_id = ?", id).Delete(&model.CspRolePolicyMapping{}).Error; err != nil {
 			return fmt.Errorf("CSP 역할 정책 매핑 삭제 실패: %w", err)
 		}
-		if err := tx.Where("csp_role_id = ?", fmt.Sprintf("%d", id)).Delete(&model.CspRolePermission{}).Error; err != nil {
-			return fmt.Errorf("CSP 역할 권한 삭제 실패: %w", err)
-		}
+		// CspRolePermission(mcmp_csp_role_permissions)은 main.go의 AutoMigrate 목록에
+		// 포함된 적이 없어 어떤 환경에도 테이블이 존재하지 않는다(관련 레포지토리 메서드도
+		// 호출부 없는 죽은 코드). 여기서 삭제를 시도하면 항상 500 에러가 난다 — IAM-BUG-021.
 		if err := tx.Where("id = ?", id).Delete(&model.CspRole{}).Error; err != nil {
 			return fmt.Errorf("CSP 역할 삭제 실패: %w", err)
 		}

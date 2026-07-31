@@ -17,10 +17,6 @@ import (
 	"gorm.io/gorm"
 )
 
-type testValidator struct{ v *validator.Validate }
-
-func (tv *testValidator) Validate(i interface{}) error { return tv.v.Struct(i) }
-
 func setupCspRoleMasterTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	// NewRoleHandler가 구성하는 MenuRepository 등 다른 리포지토리가 자체적으로
@@ -28,6 +24,9 @@ func setupCspRoleMasterTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 
+	// CspRolePermission(mcmp_csp_role_permissions)은 의도적으로 마이그레이트하지 않는다 —
+	// 실 환경(main.go AutoMigrate)에도 이 테이블이 없다(IAM-BUG-021). 여기서 만들어버리면
+	// 관련 회귀를 테스트가 잡아내지 못한다.
 	require.NoError(t, db.AutoMigrate(
 		&model.RoleMaster{},
 		&model.RoleSub{},
@@ -35,7 +34,6 @@ func setupCspRoleMasterTestDB(t *testing.T) *gorm.DB {
 		&model.RoleMasterCspRoleMapping{},
 		&model.CspPolicy{},
 		&model.CspRolePolicyMapping{},
-		&model.CspRolePermission{},
 	))
 	return db
 }
