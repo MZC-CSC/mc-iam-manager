@@ -333,7 +333,7 @@ serviceActions:
         _meta:
             version: 0.5.2
             repository: https://github.com/m-cmp/mc-iam-manager
-            generatedAt: "2026-06-01T02:11:43Z"
+            generatedAt: "2026-07-28T08:00:50Z"
         CreateFrameworkService:
             method: post
             resourcePath: /api/mcmp-apis
@@ -1204,8 +1204,8 @@ serviceActions:
             description: Update CSP policy details
         updateCspRole:
             method: put
-            resourcePath: /api/roles/csp-roles/id/{roleId}
-            description: Update role information
+            resourcePath: /api/roles/csp/id/{roleId}
+            description: Update CSP role record (idp/iam identifiers, description, extended config)
         updateGroupWorkspaceRole:
             method: put
             resourcePath: /api/groups/id/{groupId}/workspaces/{workspaceId}

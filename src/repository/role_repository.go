@@ -416,6 +416,13 @@ func (r *RoleRepository) DeleteRoleCspRoleMappings(roleID uint) error {
 		Delete(&model.RoleMasterCspRoleMapping{}).Error
 }
 
+// DeleteRoleCspRoleMappingsByCspRoleID 해당 csp_role_id를 참조하는 모든 매핑을 role_id 무관하게 삭제
+// (CspRole 레코드 자체를 삭제하기 전, 그 레코드를 참조하는 매핑을 먼저 끊어내는 용도)
+func (r *RoleRepository) DeleteRoleCspRoleMappingsByCspRoleID(cspRoleID uint) error {
+	return r.db.Where("csp_role_id = ?", cspRoleID).
+		Delete(&model.RoleMasterCspRoleMapping{}).Error
+}
+
 // CreateWorkspaceRoleCspRoleMapping 워크스페이스 역할-CSP 역할 매핑 생성
 // RoleSub = 'workspace' 가 없으면 생성하고 RoleSub = 'csp' 가 없으면 생성
 func (r *RoleRepository) CreateWorkspaceRoleCspRoleMapping(req *model.CreateCspRolesMappingRequest) error {
@@ -488,8 +495,10 @@ func (r *RoleRepository) FindRoleMasterCspRoleMappings(req *model.RoleMasterCspR
 		query = query.Where("csp_role_id = ?", req.CspRoleID)
 	}
 
-	// 현재는 OIDC로 고정. TODO : 선택하는 로직 추가 필요
-	query = query.Where("auth_method = ?", constants.AuthMethodOIDC)
+	// authMethod가 비어있지 않다면 조건 추가
+	if req.AuthMethod != "" {
+		query = query.Where("auth_method = ?", req.AuthMethod)
+	}
 
 	if err := query.Find(&mappings).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -533,8 +542,10 @@ func (r *RoleRepository) FindWorkspaceRoleCspRoleMappings(req *model.RoleMasterC
 		query = query.Where("csp_role_id = ?", req.CspRoleID)
 	}
 
-	// authMethod 는 OIDC로 고정. TODO : 선택하는 로직 추가 필요
-	query = query.Where("auth_method = ?", constants.AuthMethodOIDC)
+	// authMethod가 비어있지 않다면 조건 추가
+	if req.AuthMethod != "" {
+		query = query.Where("auth_method = ?", req.AuthMethod)
+	}
 
 	if err := query.Find(&mappings).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {

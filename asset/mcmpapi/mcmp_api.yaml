@@ -852,18 +852,6 @@ serviceActions:
       method: delete
       resourcePath: /api/wsprj/workspace/id/{workspaceId}/project/id/{projectId}
       description: "workspace - projects mapping 단건 삭제"
-    Deleteprojectbyid:
-      method: delete
-      resourcePath: /api/prj/project/id/{projectId}
-      description: "project 삭제"
-    Getprojectbyid:
-      method: get
-      resourcePath: /api/prj/project/id/{projectId}
-      description: "project 단건 조회"
-    Updateprojectbyid:
-      method: put
-      resourcePath: /api/prj/project/id/{projectId}
-      description: "project 수정"
     Searchprojectsbyname:
       method: get
       resourcePath: /api/prj/project/{projectName}

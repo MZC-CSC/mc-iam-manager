@@ -106,14 +106,19 @@ auto_setup() {
     fi
     echo "✓ Workspace-project mapping completed successfully"
 
-    # add_sample_userrole_mapping
-    # if [ $? -ne 0 ]; then
-    #     echo "ERROR: sample user role mapping failed"
-    #     return 1
-    # fi
-    
-    # echo "✓ sample user role mapping completed successfully"
-    
+    # 8-1. platformAdmin에게 기본 workspace의 workspace role 부여
+    #      (IAM-BUG-022: platformAdmin이라도 mcmp_user_workspace_roles 매핑이 없으면
+    #       ListUserProjectsByWorkspace가 403을 반환하던 문제의 보완 — 핵심 수정은 해당 API의
+    #       platformAdmin 우회 분기 추가이며, 이 단계는 클린 설치 직후 실제 매핑이 존재하는
+    #       상태를 만들어주는 보완 조치)
+    echo "Step 8-1: Assigning platformAdmin a workspace role..."
+    assign_platformadmin_workspace_role
+    if [ $? -ne 0 ]; then
+        echo "WARNING: platformAdmin workspace role assignment failed (non-fatal)"
+    else
+        echo "✓ platformAdmin workspace role assignment completed successfully"
+    fi
+
     echo "=== Automated setup completed successfully ==="
 }
 
@@ -955,6 +960,69 @@ map_workspace_projects() {
     fi
     
     echo "Workspace-Project mapping completed for workspace ID: $workspace_id"
+    return 0
+}
+
+assign_platformadmin_workspace_role() {
+    if [ -z "$workspace_id" ]; then
+        echo "ERROR: workspace_id is not set (must run after Step 8)"
+        return 1
+    fi
+
+    # 기본값: PREDEFINED_ROLE의 첫 번째 역할(관행상 admin급)을 platformAdmin의 기본
+    # workspace role로 사용한다. PREDEFINED_ROLE 순서를 admin급이 첫 항목이 아니게
+    # 바꾼 환경이라면 MC_IAM_MANAGER_PLATFORMADMIN_WORKSPACE_ROLE로 명시적으로 지정한다.
+    if [ -n "$MC_IAM_MANAGER_PLATFORMADMIN_WORKSPACE_ROLE" ]; then
+        default_role="$MC_IAM_MANAGER_PLATFORMADMIN_WORKSPACE_ROLE"
+    else
+        IFS=',' read -ra ROLES <<< "$PREDEFINED_ROLE"
+        default_role="${ROLES[0]}"
+        echo "MC_IAM_MANAGER_PLATFORMADMIN_WORKSPACE_ROLE not set, using PREDEFINED_ROLE[0]: $default_role"
+    fi
+
+    if [ -z "$default_role" ]; then
+        echo "ERROR: No role found in PREDEFINED_ROLE to assign"
+        return 1
+    fi
+
+    echo "Assigning workspace role '$default_role' to platformAdmin ($MC_IAM_MANAGER_PLATFORMADMIN_ID) for workspace ID: $workspace_id"
+
+    json_data=$(jq -n \
+        --arg username "$MC_IAM_MANAGER_PLATFORMADMIN_ID" \
+        --arg roleName "$default_role" \
+        --arg workspaceId "$workspace_id" \
+        '{username: $username, roleName: $roleName, workspaceId: $workspaceId}')
+
+    response=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST \
+        --header "Authorization: Bearer $MC_IAM_MANAGER_PLATFORMADMIN_ACCESSTOKEN" \
+        --header 'Content-Type: application/json' \
+        --data "$json_data" \
+        "$MC_IAM_MANAGER_HOST/api/roles/assign/workspace-role")
+
+    # HTTP 상태 코드와 응답 본문 분리
+    http_code=$(echo $response | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+    response_body=$(echo $response | sed -e 's/HTTPSTATUS\:.*//g')
+
+    echo "platformAdmin workspace role assignment HTTP Status: $http_code"
+    echo "platformAdmin workspace role assignment Response Body: $response_body"
+
+    if [ "$http_code" != "200" ]; then
+        echo "ERROR: platformAdmin workspace role assignment failed with HTTP status $http_code"
+        return 1
+    fi
+
+    if ! echo "$response_body" | jq . > /dev/null 2>&1; then
+        echo "ERROR: Invalid JSON response from workspace-role assignment API"
+        echo "Raw response: $response_body"
+        return 1
+    fi
+
+    if echo "$response_body" | jq -e '.error' > /dev/null 2>&1; then
+        echo "ERROR: platformAdmin workspace role assignment failed with error in response"
+        echo "$response_body" | jq '.error'
+        return 1
+    fi
+
     return 0
 }
 

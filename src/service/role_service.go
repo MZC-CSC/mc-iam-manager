@@ -361,6 +361,11 @@ func (s *RoleService) DeleteRoleCspRoleMappingsByRoleId(roleID uint) error {
 	return s.roleRepository.DeleteRoleCspRoleMappings(roleID)
 }
 
+// DeleteRoleCspRoleMappingsByCspRoleID 해당 csp_role_id를 참조하는 모든 매핑 삭제 (CspRole 레코드 삭제 전 선행 작업)
+func (s *RoleService) DeleteRoleCspRoleMappingsByCspRoleID(cspRoleID uint) error {
+	return s.roleRepository.DeleteRoleCspRoleMappingsByCspRoleID(cspRoleID)
+}
+
 // ListWorkspaceRoleCspRoleMappings 워크스페이스 역할-CSP 역할 매핑 목록 조회
 func (s *RoleService) ListWorkspaceRoleCspRoleMappings(req *model.RoleMasterCspRoleMappingRequest) ([]*model.RoleMasterCspRoleMapping, error) {
 	return s.roleRepository.FindWorkspaceRoleCspRoleMappings(req)

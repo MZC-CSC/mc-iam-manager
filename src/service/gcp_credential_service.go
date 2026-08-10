@@ -24,9 +24,37 @@ type GcpCredentialService interface {
 		subjectToken string,
 		subjectTokenType string, // "jwt" (OIDC) or "saml2" (SAML)
 	) (*model.CspCredentialResponse, error)
+
+	// ExchangeToken performs step 1 of the WIF flow only: exchanges a Keycloak
+	// subject token for a GCP federated access token via GCP STS. Exposed
+	// separately so callers (e.g. CspValidationService) can verify WIF
+	// Pool/Provider configuration independently of SA impersonation.
+	ExchangeToken(
+		ctx context.Context,
+		wifProviderResourceName string,
+		subjectToken string,
+		subjectTokenType string, // "jwt" (OIDC) or "saml2" (SAML)
+	) (string, error)
+
+	// GenerateAccessToken performs step 2 of the WIF flow only: impersonates
+	// the given Service Account using a previously obtained federated token.
+	// Exposed separately so callers can verify SA existence/WIF binding
+	// independently of the STS token exchange.
+	GenerateAccessToken(
+		ctx context.Context,
+		serviceAccountEmail string,
+		federatedToken string,
+	) (*model.CspCredentialResponse, error)
 }
 
 type gcpCredentialService struct{}
+
+// gcpSTSURL and gcpIAMCredentialsURLFormat are package-level vars (rather than
+// inline constants) so unit tests can point them at an httptest server.
+var (
+	gcpSTSURL                  = "https://sts.googleapis.com/v1/token"
+	gcpIAMCredentialsURLFormat = "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s:generateAccessToken"
+)
 
 // NewGcpCredentialService creates a new GcpCredentialService.
 func NewGcpCredentialService() GcpCredentialService {
@@ -67,7 +95,7 @@ func (s *gcpCredentialService) ExchangeTokenAndImpersonate(
 	log.Printf("[GCP_CREDENTIAL] Starting WIF token exchange for SA: %s (tokenType: %s)", serviceAccountEmail, subjectTokenType)
 
 	// Step 1: Exchange Keycloak token for GCP federated access token via GCP STS
-	federatedToken, err := s.exchangeToken(ctx, wifProviderResourceName, subjectToken, subjectTokenType)
+	federatedToken, err := s.ExchangeToken(ctx, wifProviderResourceName, subjectToken, subjectTokenType)
 	if err != nil {
 		log.Printf("[GCP_CREDENTIAL] STS token exchange failed: %v", err)
 		return nil, fmt.Errorf("GCP STS token exchange failed: %w", err)
@@ -75,13 +103,38 @@ func (s *gcpCredentialService) ExchangeTokenAndImpersonate(
 	log.Printf("[GCP_CREDENTIAL] STS token exchange succeeded")
 
 	// Step 2: Use federated token to impersonate Service Account
-	saToken, expireTime, err := s.generateAccessToken(ctx, serviceAccountEmail, federatedToken)
+	creds, err := s.GenerateAccessToken(ctx, serviceAccountEmail, federatedToken)
 	if err != nil {
 		log.Printf("[GCP_CREDENTIAL] SA impersonation failed: %v", err)
 		return nil, fmt.Errorf("GCP SA impersonation failed: %w", err)
 	}
-	log.Printf("[GCP_CREDENTIAL] SA impersonation succeeded, expiry: %s", expireTime)
+	log.Printf("[GCP_CREDENTIAL] SA impersonation succeeded, expiry: %s", creds.Expiration)
 
+	return creds, nil
+}
+
+// ExchangeToken exchanges a Keycloak subject token for a GCP federated access
+// token via GCP STS (step 1 of the WIF flow).
+func (s *gcpCredentialService) ExchangeToken(
+	ctx context.Context,
+	wifProviderResourceName string,
+	subjectToken string,
+	subjectTokenType string,
+) (string, error) {
+	return s.exchangeToken(ctx, wifProviderResourceName, subjectToken, subjectTokenType)
+}
+
+// GenerateAccessToken impersonates the given Service Account using a
+// federated access token (step 2 of the WIF flow).
+func (s *gcpCredentialService) GenerateAccessToken(
+	ctx context.Context,
+	serviceAccountEmail string,
+	federatedToken string,
+) (*model.CspCredentialResponse, error) {
+	saToken, expireTime, err := s.generateAccessToken(ctx, serviceAccountEmail, federatedToken)
+	if err != nil {
+		return nil, err
+	}
 	return &model.CspCredentialResponse{
 		CspType:     "gcp",
 		AccessToken: saToken,
@@ -93,7 +146,7 @@ func (s *gcpCredentialService) ExchangeTokenAndImpersonate(
 // exchangeToken calls GCP STS to exchange a subject token for a federated access token.
 // subjectTokenType: "jwt" for OIDC, "saml2" for SAML2 assertion.
 func (s *gcpCredentialService) exchangeToken(ctx context.Context, audience, subjectToken, subjectTokenType string) (string, error) {
-	stsURL := "https://sts.googleapis.com/v1/token"
+	stsURL := gcpSTSURL
 
 	tokenTypeURN := "urn:ietf:params:oauth:token-type:jwt"
 	if subjectTokenType == "saml2" {
@@ -143,10 +196,7 @@ func (s *gcpCredentialService) exchangeToken(ctx context.Context, audience, subj
 
 // generateAccessToken calls GCP IAM Credentials API to impersonate a Service Account.
 func (s *gcpCredentialService) generateAccessToken(ctx context.Context, serviceAccountEmail, federatedToken string) (string, time.Time, error) {
-	iamURL := fmt.Sprintf(
-		"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s:generateAccessToken",
-		serviceAccountEmail,
-	)
+	iamURL := fmt.Sprintf(gcpIAMCredentialsURLFormat, serviceAccountEmail)
 
 	reqBody := gcpGenerateAccessTokenRequest{
 		Scope: []string{"https://www.googleapis.com/auth/cloud-platform"},
