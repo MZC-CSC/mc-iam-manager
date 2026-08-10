@@ -969,9 +969,16 @@ assign_platformadmin_workspace_role() {
         return 1
     fi
 
-    # PREDEFINED_ROLE의 첫 번째 역할을 platformAdmin의 기본 workspace role로 사용한다
-    IFS=',' read -ra ROLES <<< "$PREDEFINED_ROLE"
-    default_role="${ROLES[0]}"
+    # 기본값: PREDEFINED_ROLE의 첫 번째 역할(관행상 admin급)을 platformAdmin의 기본
+    # workspace role로 사용한다. PREDEFINED_ROLE 순서를 admin급이 첫 항목이 아니게
+    # 바꾼 환경이라면 MC_IAM_MANAGER_PLATFORMADMIN_WORKSPACE_ROLE로 명시적으로 지정한다.
+    if [ -n "$MC_IAM_MANAGER_PLATFORMADMIN_WORKSPACE_ROLE" ]; then
+        default_role="$MC_IAM_MANAGER_PLATFORMADMIN_WORKSPACE_ROLE"
+    else
+        IFS=',' read -ra ROLES <<< "$PREDEFINED_ROLE"
+        default_role="${ROLES[0]}"
+        echo "MC_IAM_MANAGER_PLATFORMADMIN_WORKSPACE_ROLE not set, using PREDEFINED_ROLE[0]: $default_role"
+    fi
 
     if [ -z "$default_role" ]; then
         echo "ERROR: No role found in PREDEFINED_ROLE to assign"

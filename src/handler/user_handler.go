@@ -907,16 +907,7 @@ func (h *UserHandler) ListUserProjectsByWorkspace(c echo.Context) error {
 	}
 
 	// 1-0. platformAdmin이면 소속 검증을 건너뛴다 (ListUserWorkspaces와 동일한 정책)
-	userPlatformRoles, _ := c.Get("platformRoles").([]string)
-	isPlatformAdmin := false
-	for _, role := range userPlatformRoles {
-		if role == "platformAdmin" {
-			isPlatformAdmin = true
-			break
-		}
-	}
-
-	if !isPlatformAdmin {
+	if !checkRoleFromContext(c, []string{"platformAdmin"}) {
 		// 1. 사용자가 실제로 해당 workspace에 소속되어 있는지 먼저 검증한다.
 		//    (WorkspaceID + UserID 조건을 함께 걸어야 하므로 project 정보가 없는 ListWorkspaces를 사용한다.
 		//     FindWorkspacesProjects는 WorkspaceID가 있으면 UserID를 확인하기 전에 바로 return해버려서 사용할 수 없다.)
