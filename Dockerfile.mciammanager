@@ -36,13 +36,15 @@ COPY --from=builder /mc-iam-manager /app/mc-iam-manager
 # Copy necessary assets from the builder stage
 COPY --from=builder /app/asset ./asset
 
-# Copy .env file to multiple locations for compatibility with the application's .env loading logic
-COPY .env /app/.env
-COPY .env /.env
+# .env is no longer tracked in git (IAM-BUG-009), so it doesn't exist in the build
+# context. Ship the template as a fallback default in both lookup paths; godotenv
+# only fills in variables not already set, so real values injected via
+# docker-compose env_file/environment always take precedence over this fallback.
+COPY .env.setup /app/.env
+COPY .env.setup /.env
 
 # Expose the application port (adjust if different)
 EXPOSE 8082
 
 # Command to run the application
-# The application reads .env from multiple locations for compatibility
 CMD ["./mc-iam-manager"]

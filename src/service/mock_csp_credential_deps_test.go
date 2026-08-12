@@ -42,10 +42,23 @@ func (m *mockAwsCredService) CheckCallerIdentity(_ context.Context, accessKeyID,
 type mockGcpCredService struct {
 	result *model.CspCredentialResponse
 	err    error
+
+	federatedToken string
+	exchangeErr    error
+	genResult      *model.CspCredentialResponse
+	genErr         error
 }
 
 func (m *mockGcpCredService) ExchangeTokenAndImpersonate(_ context.Context, wif, sa, token, tokenType string) (*model.CspCredentialResponse, error) {
 	return m.result, m.err
+}
+
+func (m *mockGcpCredService) ExchangeToken(_ context.Context, wifProviderResourceName, subjectToken, subjectTokenType string) (string, error) {
+	return m.federatedToken, m.exchangeErr
+}
+
+func (m *mockGcpCredService) GenerateAccessToken(_ context.Context, serviceAccountEmail, federatedToken string) (*model.CspCredentialResponse, error) {
+	return m.genResult, m.genErr
 }
 
 // ── Alibaba ──────────────────────────────────────────────────────────────────
@@ -82,11 +95,22 @@ func (m *mockAzureCredService) GetTokenByFederatedCredential(_ context.Context, 
 // ── Tencent ───────────────────────────────────────────────────────────────────
 
 type mockTencentCredService struct {
-	result *model.CspCredentialResponse
-	err    error
+	result             *model.CspCredentialResponse
+	err                error
+	oidcResult         *model.CspCredentialResponse
+	oidcErr            error
+	capturedProviderId string
 }
 
 func (m *mockTencentCredService) AssumeRoleWithSAML(_ context.Context, secretID, secretKey, roleArn, principalArn, samlAssertion, region string) (*model.CspCredentialResponse, error) {
+	return m.result, m.err
+}
+
+func (m *mockTencentCredService) AssumeRoleWithWebIdentity(_ context.Context, secretID, secretKey, roleArn, providerId, webIdentityToken, region string) (*model.CspCredentialResponse, error) {
+	m.capturedProviderId = providerId
+	if m.oidcResult != nil || m.oidcErr != nil {
+		return m.oidcResult, m.oidcErr
+	}
 	return m.result, m.err
 }
 
@@ -176,6 +200,13 @@ var tencentSamlCred = &model.CspCredentialResponse{
 	AccessKeyId:     "STS_TENCENT",
 	SecretAccessKey: "tencent_secret",
 	SessionToken:    "tencent_token",
+}
+
+var tencentOidcCred = &model.CspCredentialResponse{
+	CspType:         "tencent",
+	AccessKeyId:     "STS_TENCENT_OIDC",
+	SecretAccessKey: "tencent_oidc_secret",
+	SessionToken:    "tencent_oidc_token",
 }
 
 var ibmOidcCred = &model.CspCredentialResponse{

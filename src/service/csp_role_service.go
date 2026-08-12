@@ -97,11 +97,15 @@ func (s *CspRoleService) CreateCspRole(req *model.CreateCspRoleRequest) (*model.
 		cspRole, err = s.createAwsIamRole(req)
 	default:
 		// AWS 이외 CSP: DB 등록만 수행 (클라우드 역할 생성은 향후 확장)
+		// idp/iam identifier는 admin이 CSP 콘솔에서 수동 생성한 리소스의 ARN/이메일을 그대로 등록하는 값이므로
+		// 요청에서 받은 값을 반드시 저장해야 한다 (OI-24: 이전에는 여기서 누락되어 항상 빈 값으로 저장됐음).
 		cspRole = &model.CspRole{
-			Name:        req.CspRoleName,
-			Description: req.Description,
-			CspType:     req.CspType,
-			Status:      "created",
+			Name:          req.CspRoleName,
+			Description:   req.Description,
+			CspType:       req.CspType,
+			Status:        "created",
+			IdpIdentifier: req.IdpIdentifier,
+			IamIdentifier: req.IamIdentifier,
 		}
 		if err := s.cspRoleRepo.CreateCspRoleRecord(cspRole); err != nil {
 			return nil, fmt.Errorf("failed to create CSP role record: %w", err)
@@ -180,7 +184,13 @@ func (s *CspRoleService) createAwsIamRole(req *model.CreateCspRoleRequest) (*mod
 func (s *CspRoleService) createAndPollAwsIamRole(awsIamClient *iam.Client, newRole *model.CspRole, req *model.CreateCspRoleRequest) (*model.CspRole, error) {
 	idpIdentifier := ""
 
-	assumeRolePolicyDocument, err := getAwsAssumeRolePolicyDocument(newRole)
+	var assumeRolePolicyDocument string
+	var err error
+	if req.AuthMethod == constants.AuthMethodSAML {
+		assumeRolePolicyDocument, err = getAwsSamlAssumeRolePolicyDocument(req)
+	} else {
+		assumeRolePolicyDocument, err = getAwsAssumeRolePolicyDocument(newRole)
+	}
 	if err != nil {
 		newRole.Status = "failed"
 		s.cspRoleRepo.UpdateCspRoleRecord(newRole)
@@ -373,6 +383,55 @@ func getAwsAssumeRolePolicyDocument(role *model.CspRole) (string, error) {
 	return buf.String(), nil
 }
 
+// awsSamlPolicyValues AWS SAML AssumeRole 정책 문서 템플릿에 채울 값
+type awsSamlPolicyValues struct {
+	SamlProviderArn string
+}
+
+// getAwsSamlAssumeRolePolicyDocument SAML federation용 AssumeRole 정책 문서를 반환합니다.
+// SAML Provider ARN(req.IdpIdentifier, 사전에 `aws iam create-saml-provider`로 등록된 값)을
+// Federated principal로 사용한다. OIDC와 달리 발급자 정보가 env var로 결정되지 않고
+// 호출자가 등록한 SAML Provider 하나하나가 곧 신뢰 대상이므로 req에서 직접 받는다.
+func getAwsSamlAssumeRolePolicyDocument(req *model.CreateCspRoleRequest) (string, error) {
+	const policyTemplate = `{
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Effect": "Allow",
+				"Principal": {
+					"Federated": "{{.SamlProviderArn}}"
+				},
+				"Action": "sts:AssumeRoleWithSAML",
+				"Condition": {
+					"StringEquals": {
+						"SAML:aud": "https://signin.aws.amazon.com/saml"
+					}
+				}
+			}
+		]
+	}`
+
+	if req.IdpIdentifier == "" {
+		return "", fmt.Errorf("idpIdentifier (SAML provider ARN) is required for SAML CSP role creation")
+	}
+
+	values := awsSamlPolicyValues{
+		SamlProviderArn: req.IdpIdentifier,
+	}
+
+	tmpl, err := template.New("samlPolicy").Parse(policyTemplate)
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	err = tmpl.Execute(&buf, values)
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
 // mapAwsRoleToModel AWS IAM GetRole 응답을 CspRole 모델로 매핑합니다.
 func mapAwsRoleToModel(id uint, cspType string, idpIdentifier string, getRoleResult *iam.GetRoleOutput) *model.CspRole {
 	createdRole := &model.CspRole{
@@ -524,14 +583,76 @@ func (s *CspRoleService) UpdateCspRole(id uint, req *model.CreateCspRoleRequest)
 	if err != nil {
 		return fmt.Errorf("failed to get existing role: %v", err)
 	}
-	existingRole.Name = req.CspRoleName
-	existingRole.Description = req.Description
-	return s.cspRoleRepo.UpdateCSPRole(existingRole)
+	if req.CspRoleName != "" {
+		existingRole.Name = req.CspRoleName
+	}
+	if req.Description != "" {
+		existingRole.Description = req.Description
+	}
+	if req.IdpIdentifier != "" {
+		existingRole.IdpIdentifier = req.IdpIdentifier
+	}
+	if req.IamIdentifier != "" {
+		existingRole.IamIdentifier = req.IamIdentifier
+	}
+	if req.IamRoleId != "" {
+		existingRole.IamRoleId = req.IamRoleId
+	}
+	if req.Path != "" {
+		existingRole.Path = req.Path
+	}
+	if len(req.ExtendedConfig) > 0 {
+		existingRole.ExtendedConfig = req.ExtendedConfig
+	}
+	if req.CspIdpConfigID != nil {
+		existingRole.CspIdpConfigID = req.CspIdpConfigID
+	}
+	// DB 전용 업데이트로 변경 (기존에는 CspType 무관하게 항상 AWS UpdateRoleDescription을
+	// 호출해 GCP/Alibaba 등 비-AWS CspRole 수정 시 항상 실패했다 — SAML ExtendedConfig를
+	// 모든 CSP에서 API로 설정 가능하게 하려면 이 경로도 함께 고쳐야 한다).
+	return s.cspRoleRepo.UpdateCspRoleRecord(existingRole)
 }
 
 // DeleteCspRole CSP 역할을 삭제합니다.
+// DeleteCspRole CspRole(mcmp_role_csp_roles) 레코드를 삭제합니다.
+// CreateCspRole과 대칭되는 CspType 분기: AWS는 실제 클라우드 Role도 함께 삭제하고,
+// 그 외에는 DB 레코드만 정리합니다. 이 레코드를 참조하는 RoleMasterCspRoleMapping은
+// 호출 전에 별도로 정리되어 있어야 한다(핸들러에서 DeleteRoleCspRoleMappingsByCspRoleID 선행 호출).
 func (s *CspRoleService) DeleteCspRole(id uint) error {
-	return s.cspRoleRepo.DeleteCSPRole(fmt.Sprintf("%d", id))
+	role, err := s.cspRoleRepo.GetRoleByID(id)
+	if err != nil {
+		return fmt.Errorf("failed to find CSP role: %w", err)
+	}
+
+	if role.CspType == "aws" {
+		if err := s.deleteAwsIamRole(role.Name); err != nil {
+			return err
+		}
+	}
+
+	return s.cspRoleRepo.DeleteCspRoleRecord(id)
+}
+
+// deleteAwsIamRole AWS IAM Role을 삭제합니다. (private, AWS 전용)
+func (s *CspRoleService) deleteAwsIamRole(roleName string) error {
+	issuedBy := "system"
+	credential, err := s.tempCredentialRepo.GetOrCreateValidCredential("aws", "oidc", "ap-northeast-2", nil, issuedBy, func() (*model.TempCredential, error) {
+		return s.createNewAwsCredential(issuedBy)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get or create valid credential: %v", err)
+	}
+
+	awsCfg, err := s.createAwsConfigWithTempCredential(credential)
+	if err != nil {
+		return fmt.Errorf("failed to create AWS config with temp credential: %v", err)
+	}
+
+	awsIamClient := iam.NewFromConfig(awsCfg)
+	if _, err := awsIamClient.DeleteRole(context.TODO(), &iam.DeleteRoleInput{RoleName: aws.String(roleName)}); err != nil {
+		return fmt.Errorf("failed to delete IAM role: %v", err)
+	}
+	return nil
 }
 
 // CleanupExpiredCredentials 만료된 임시 자격 증명을 정리합니다.
@@ -544,16 +665,6 @@ func (s *CspRoleService) UpdateCSPRole(role *model.CspRole) error {
 	err := s.cspRoleRepo.UpdateCSPRole(role)
 	if err != nil {
 		log.Printf("Failed to update CSP role: %v", err)
-		return err
-	}
-	return nil
-}
-
-// DeleteCSPRole CSP 역할을 삭제합니다.
-func (s *CspRoleService) DeleteCSPRole(id string) error {
-	err := s.cspRoleRepo.DeleteCSPRole(id)
-	if err != nil {
-		log.Printf("Failed to delete CSP role: %v", err)
 		return err
 	}
 	return nil

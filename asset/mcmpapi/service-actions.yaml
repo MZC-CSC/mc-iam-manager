@@ -333,7 +333,7 @@ serviceActions:
         _meta:
             version: 0.5.2
             repository: https://github.com/m-cmp/mc-iam-manager
-            generatedAt: "2026-06-01T02:11:43Z"
+            generatedAt: "2026-07-28T08:00:50Z"
         CreateFrameworkService:
             method: post
             resourcePath: /api/mcmp-apis
@@ -833,7 +833,19 @@ serviceActions:
         initializeMenuPermissions:
             method: get
             resourcePath: /api/setup/initial-role-menu-permission
-            description: CSV 파일을 읽어서 메뉴 권한을 초기화합니다
+            description: "(Deprecated) CSV 파일을 읽어서 메뉴 권한을 초기화합니다. Use initializeMenuPermissionsFromYAML."
+        initializeMenuPermissionsFromYAML:
+            method: get
+            resourcePath: /api/setup/initial-role-menu-permission-yaml
+            description: permission.yaml(permissions→role→menus|operations|csps)을 읽어 역할-메뉴 권한을 초기화합니다
+        backupRolePermissions:
+            method: get
+            resourcePath: /api/setup/backup-role-permissions
+            description: DB의 현재 플랫폼 역할 권한을 role-permission-backup 문서로 내보냅니다
+        restoreRolePermissions:
+            method: post
+            resourcePath: /api/setup/restore-role-permissions
+            description: role-permission-backup 문서로 역할 권한을 복구합니다 (additive|replace-role)
         listAllInvitations:
             method: get
             resourcePath: /api/invitations
@@ -1192,8 +1204,8 @@ serviceActions:
             description: Update CSP policy details
         updateCspRole:
             method: put
-            resourcePath: /api/roles/csp-roles/id/{roleId}
-            description: Update role information
+            resourcePath: /api/roles/csp/id/{roleId}
+            description: Update CSP role record (idp/iam identifiers, description, extended config)
         updateGroupWorkspaceRole:
             method: put
             resourcePath: /api/groups/id/{groupId}/workspaces/{workspaceId}

@@ -1,0 +1,273 @@
+package service
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/m-cmp/mc-iam-manager/constants"
+	"github.com/m-cmp/mc-iam-manager/model"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func newTestCspRoleService(t *testing.T) *CspRoleService {
+	db := setupTestDB(t)
+	return NewCspRoleService(db, &mockKeycloakService{})
+}
+
+// TestCreateCspRole_GCP_PersistsIdentifiers: 비-AWS CSP(default 분기)도 요청의
+// idpIdentifier/iamIdentifier를 그대로 저장해야 한다 (OI-24 회귀 방지).
+func TestCreateCspRole_GCP_PersistsIdentifiers(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	req := &model.CreateCspRoleRequest{
+		CspRoleName:   "mcmp-admin",
+		CspType:       "gcp",
+		AuthMethod:    constants.AuthMethodOIDC,
+		IdpIdentifier: "//iam.googleapis.com/projects/295058475885/locations/global/workloadIdentityPools/mcmp-oidc/providers/mcmp",
+		IamIdentifier: "mcmp-admin@csta-349809.iam.gserviceaccount.com",
+	}
+
+	role, err := svc.CreateCspRole(req)
+	require.NoError(t, err)
+	require.NotNil(t, role)
+
+	assert.Equal(t, req.IdpIdentifier, role.IdpIdentifier)
+	assert.Equal(t, req.IamIdentifier, role.IamIdentifier)
+	assert.Equal(t, "created", role.Status)
+}
+
+// TestCreateCspRole_Alibaba_PersistsIdentifiers: 동일한 default 분기를 타는
+// 다른 CSP(alibaba)에서도 identifier가 저장되는지 확인.
+func TestCreateCspRole_Alibaba_PersistsIdentifiers(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	req := &model.CreateCspRoleRequest{
+		CspRoleName:   "mciam-oidc-role",
+		CspType:       "alibaba",
+		AuthMethod:    constants.AuthMethodOIDC,
+		IdpIdentifier: "acs:ram::5513479151634744:oidc-provider/mciam-keycloak",
+		IamIdentifier: "acs:ram::5513479151634744:role/mciam-oidc-role",
+	}
+
+	role, err := svc.CreateCspRole(req)
+	require.NoError(t, err)
+	require.NotNil(t, role)
+
+	assert.Equal(t, req.IdpIdentifier, role.IdpIdentifier)
+	assert.Equal(t, req.IamIdentifier, role.IamIdentifier)
+}
+
+// TestGetAwsSamlAssumeRolePolicyDocument_Success: AWS SAML CspRole 생성 시
+// trust policy가 SAML Provider ARN을 Federated principal로, sts:AssumeRoleWithSAML을
+// Action으로 갖는지 확인한다 (기존 OIDC 전용 getAwsAssumeRolePolicyDocument와 별도 경로).
+func TestGetAwsSamlAssumeRolePolicyDocument_Success(t *testing.T) {
+	req := &model.CreateCspRoleRequest{
+		CspRoleName:   "mciam-admin-saml",
+		CspType:       "aws",
+		AuthMethod:    constants.AuthMethodSAML,
+		IdpIdentifier: "arn:aws:iam::050864702683:saml-provider/mcmp-dev-cscmzc-com-saml",
+	}
+
+	doc, err := getAwsSamlAssumeRolePolicyDocument(req)
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(doc), &parsed))
+
+	statements := parsed["Statement"].([]interface{})
+	require.Len(t, statements, 1)
+	statement := statements[0].(map[string]interface{})
+
+	assert.Equal(t, "sts:AssumeRoleWithSAML", statement["Action"])
+	principal := statement["Principal"].(map[string]interface{})
+	assert.Equal(t, req.IdpIdentifier, principal["Federated"])
+	condition := statement["Condition"].(map[string]interface{})
+	stringEquals := condition["StringEquals"].(map[string]interface{})
+	assert.Equal(t, "https://signin.aws.amazon.com/saml", stringEquals["SAML:aud"])
+}
+
+// TestGetAwsSamlAssumeRolePolicyDocument_MissingIdpIdentifier: SAML Provider ARN
+// 없이는 trust policy를 만들 수 없으므로 명시적으로 에러를 반환해야 한다.
+func TestGetAwsSamlAssumeRolePolicyDocument_MissingIdpIdentifier(t *testing.T) {
+	req := &model.CreateCspRoleRequest{
+		CspRoleName: "mciam-admin-saml",
+		CspType:     "aws",
+		AuthMethod:  constants.AuthMethodSAML,
+	}
+
+	_, err := getAwsSamlAssumeRolePolicyDocument(req)
+	assert.Error(t, err)
+}
+
+// TestUpdateCspRole_PersistsExtendedConfig: SAML 발급에 필수인
+// ExtendedConfig["saml_client_id"]를 raw SQL이 아니라 UpdateCspRole API로
+// 설정할 수 있어야 한다.
+func TestUpdateCspRole_PersistsExtendedConfig(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	created, err := svc.CreateCspRole(&model.CreateCspRoleRequest{
+		CspRoleName:   "mcmp-admin-extcfg",
+		CspType:       "gcp",
+		AuthMethod:    constants.AuthMethodOIDC,
+		IdpIdentifier: "//iam.googleapis.com/projects/x/locations/global/workloadIdentityPools/p/providers/pr",
+		IamIdentifier: "sa@project.iam.gserviceaccount.com",
+	})
+	require.NoError(t, err)
+
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
+		CspRoleName: created.Name,
+		ExtendedConfig: map[string]interface{}{
+			"saml_client_id": "urn:amazon:webservices",
+		},
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.GetCspRoleByID(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "urn:amazon:webservices", updated.ExtendedConfig["saml_client_id"])
+}
+
+// TestUpdateCspRole_PersistsCspIdpConfigID: CspRole이 어떤 CspIdpConfig(OIDC/SAML
+// 트러스트 설정)를 쓸지는 CspIdpConfigID FK로 연결되는데, 이 필드를 설정할 API가
+// 없었다(raw SQL만 가능). UpdateCspRole로 설정 가능해야 한다.
+func TestUpdateCspRole_PersistsCspIdpConfigID(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	created, err := svc.CreateCspRole(&model.CreateCspRoleRequest{
+		CspRoleName:   "mcmp-admin-idpcfg",
+		CspType:       "gcp",
+		AuthMethod:    constants.AuthMethodOIDC,
+		IdpIdentifier: "//iam.googleapis.com/projects/x/locations/global/workloadIdentityPools/p/providers/pr",
+		IamIdentifier: "sa@project.iam.gserviceaccount.com",
+	})
+	require.NoError(t, err)
+
+	idpConfigID := uint(42)
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
+		CspRoleName:    created.Name,
+		CspIdpConfigID: &idpConfigID,
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.GetCspRoleByID(created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.CspIdpConfigID)
+	assert.Equal(t, idpConfigID, *updated.CspIdpConfigID)
+}
+
+// TestUpdateCspRole_PersistsIdentifierFields: UpdateCspRole이 Name/Description/
+// ExtendedConfig/CspIdpConfigID만 반영하고 IdpIdentifier/IamIdentifier/IamRoleId/Path는
+// 무시하던 버그(콘솔 CSP Role Edit 저장 시 이 4필드가 항상 유실) 회귀 방지.
+func TestUpdateCspRole_PersistsIdentifierFields(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	created, err := svc.CreateCspRole(&model.CreateCspRoleRequest{
+		CspRoleName:   "mcmp-admin-identifiers",
+		CspType:       "gcp",
+		AuthMethod:    constants.AuthMethodOIDC,
+		IdpIdentifier: "//iam.googleapis.com/projects/x/locations/global/workloadIdentityPools/p/providers/pr",
+		IamIdentifier: "sa@project.iam.gserviceaccount.com",
+	})
+	require.NoError(t, err)
+
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
+		CspRoleName:   created.Name,
+		IdpIdentifier: "//iam.googleapis.com/projects/x/locations/global/workloadIdentityPools/p/providers/pr-updated",
+		IamIdentifier: "sa-updated@project.iam.gserviceaccount.com",
+		IamRoleId:     "role-id-updated",
+		Path:          "/updated/",
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.GetCspRoleByID(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "//iam.googleapis.com/projects/x/locations/global/workloadIdentityPools/p/providers/pr-updated", updated.IdpIdentifier)
+	assert.Equal(t, "sa-updated@project.iam.gserviceaccount.com", updated.IamIdentifier)
+	assert.Equal(t, "role-id-updated", updated.IamRoleId)
+	assert.Equal(t, "/updated/", updated.Path)
+}
+
+// TestUpdateCspRole_EmptyIdentifierFields_PreservesExisting: 요청에 identifier
+// 필드가 비어 있으면(옵셔널 필드 미전달) 기존 값을 보존해야 한다 — ExtendedConfig/
+// CspIdpConfigID와 동일한 "미전달 시 유지" 정책.
+func TestUpdateCspRole_EmptyIdentifierFields_PreservesExisting(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	created, err := svc.CreateCspRole(&model.CreateCspRoleRequest{
+		CspRoleName:   "mcmp-admin-preserve",
+		CspType:       "gcp",
+		AuthMethod:    constants.AuthMethodOIDC,
+		IdpIdentifier: "//iam.googleapis.com/projects/x/locations/global/workloadIdentityPools/p/providers/pr",
+		IamIdentifier: "sa@project.iam.gserviceaccount.com",
+		IamRoleId:     "role-id-original",
+		Path:          "/original/",
+	})
+	require.NoError(t, err)
+
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
+		CspRoleName: created.Name,
+		Description: "설명만 변경",
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.GetCspRoleByID(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "설명만 변경", updated.Description)
+	assert.Equal(t, created.IdpIdentifier, updated.IdpIdentifier)
+	assert.Equal(t, created.IamIdentifier, updated.IamIdentifier)
+	assert.Equal(t, created.IamRoleId, updated.IamRoleId)
+	assert.Equal(t, created.Path, updated.Path)
+}
+
+// TestUpdateCspRole_EmptyName_PreservesExisting: IAM-BUG-018 회귀 방지.
+// 콘솔 Edit 모달은 Name을 읽기 전용으로 취급해 저장 요청에 cspRoleName을
+// 아예 보내지 않는다(빈 문자열). CspRoleName이 빈 값이면 기존 Name을
+// 보존해야 하며, 데이터 유실(빈 문자열로 덮어쓰기)이 발생하면 안 된다.
+func TestUpdateCspRole_EmptyName_PreservesExisting(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	created, err := svc.CreateCspRole(&model.CreateCspRoleRequest{
+		CspRoleName: "original-name-must-survive",
+		CspType:     "gcp",
+		AuthMethod:  constants.AuthMethodOIDC,
+	})
+	require.NoError(t, err)
+	originalName := created.Name
+
+	// 콘솔 Edit 모달과 동일하게 cspRoleName 자체를 보내지 않음(빈 문자열)
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
+		Description:   "updated description",
+		IdpIdentifier: "updated-idp",
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.GetCspRoleByID(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, originalName, updated.Name, "빈 cspRoleName으로 수정해도 기존 Name이 보존되어야 함")
+	assert.Equal(t, "updated description", updated.Description)
+	assert.Equal(t, "updated-idp", updated.IdpIdentifier)
+}
+
+// TestUpdateCspRole_NonEmptyName_Updates: cspRoleName이 실제로 전달되면
+// 정상적으로 Name이 반영되어야 한다(가드가 과도하게 막지 않는지 확인).
+func TestUpdateCspRole_NonEmptyName_Updates(t *testing.T) {
+	svc := newTestCspRoleService(t)
+
+	created, err := svc.CreateCspRole(&model.CreateCspRoleRequest{
+		CspRoleName: "before-rename",
+		CspType:     "gcp",
+		AuthMethod:  constants.AuthMethodOIDC,
+	})
+	require.NoError(t, err)
+
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
+		CspRoleName: "after-rename",
+		Description: "d",
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.GetCspRoleByID(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "after-rename", updated.Name)
+}

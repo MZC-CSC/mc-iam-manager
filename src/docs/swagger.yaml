@@ -44,10 +44,6 @@ definitions:
       RoleTypeCSP: CSP 역할
       RoleTypePlatform: 플랫폼 역할
       RoleTypeWorkspace: 워크스페이스 역할
-    x-enum-descriptions:
-    - 플랫폼 역할
-    - 워크스페이스 역할
-    - CSP 역할
     x-enum-varnames:
     - RoleTypePlatform
     - RoleTypeWorkspace
@@ -480,6 +476,9 @@ definitions:
         allOf:
         - $ref: '#/definitions/constants.AuthMethod'
         description: 인증방식 (OIDC/SAML/SECRET_KEY), 미지정 시 OIDC 기본값
+      cspIdpConfigId:
+        description: 이 CspRole이 사용할 CspIdpConfig(OIDC/SAML 등 트러스트 설정) 연결
+        type: integer
       cspRoleName:
         description: csp의 RoleName. 여러 role이 있기때문에 csp에 정의한 role로 구분하기 위해 사용
         type: string
@@ -487,6 +486,9 @@ definitions:
         type: string
       description:
         type: string
+      extendedConfig:
+        additionalProperties: true
+        type: object
       iamIdentifier:
         type: string
       iamRoleId:
@@ -556,6 +558,8 @@ definitions:
     properties:
       displayName:
         type: string
+      frameworkService:
+        type: string
       id:
         type: string
       isAction:
@@ -563,6 +567,8 @@ definitions:
       menuNumber:
         type: string
       parentId:
+        type: string
+      path:
         type: string
       priority:
         type: string
@@ -573,6 +579,8 @@ definitions:
         items:
           type: integer
         type: array
+      viewType:
+        type: string
     required:
     - id
     type: object
@@ -1151,6 +1159,8 @@ definitions:
     properties:
       displayName:
         type: string
+      frameworkService:
+        type: string
       id:
         type: string
       isAction:
@@ -1159,9 +1169,13 @@ definitions:
         type: integer
       parentId:
         type: string
+      path:
+        type: string
       priority:
         type: integer
       resType:
+        type: string
+      viewType:
         type: string
     type: object
   model.MenuTreeNode:
@@ -1173,6 +1187,8 @@ definitions:
         type: array
       displayName:
         type: string
+      frameworkService:
+        type: string
       id:
         type: string
       isAction:
@@ -1181,9 +1197,13 @@ definitions:
         type: integer
       parentId:
         type: string
+      path:
+        type: string
       priority:
         type: integer
       resType:
+        type: string
+      viewType:
         type: string
     type: object
   model.MoveOrganizationRequest:
@@ -1275,10 +1295,6 @@ definitions:
       PolicyTypeCustom: 사용자 정의 정책
       PolicyTypeInline: 인라인 정책 (역할에 직접 포함)
       PolicyTypeManaged: 관리형 정책 (독립 정책)
-    x-enum-descriptions:
-    - 인라인 정책 (역할에 직접 포함)
-    - 관리형 정책 (독립 정책)
-    - 사용자 정의 정책
     x-enum-varnames:
     - PolicyTypeInline
     - PolicyTypeManaged
@@ -1397,6 +1413,33 @@ definitions:
         type: string
       nsId:
         type: string
+    type: object
+  model.RemediationGuide:
+    properties:
+      consoleSteps:
+        description: CSP 콘솔/CLI 조작 순서
+        items:
+          type: string
+        type: array
+      docsRef:
+        description: '선택: 참고 문서 링크'
+        type: string
+      summary:
+        description: 한 줄 요약
+        type: string
+      template:
+        description: '선택: Trust Policy JSON 등 복사-붙여넣기 템플릿'
+        type: string
+    type: object
+  model.RemoveGroupUsersRequest:
+    properties:
+      user_ids:
+        items:
+          type: integer
+        minItems: 1
+        type: array
+    required:
+    - user_ids
     type: object
   model.ResetPasswordRequest:
     properties:
@@ -1542,6 +1585,53 @@ definitions:
         type: integer
       updated_at:
         type: string
+    type: object
+  model.RolePermissionBackup:
+    properties:
+      backupAt:
+        type: string
+      kind:
+        type: string
+      permissions:
+        items:
+          $ref: '#/definitions/model.RolePermissionEntry'
+        type: array
+      sections:
+        items:
+          type: string
+        type: array
+      source:
+        type: string
+    type: object
+  model.RolePermissionEntry:
+    properties:
+      csps:
+        items:
+          type: string
+        type: array
+      menus:
+        items:
+          type: string
+        type: array
+      operations:
+        items:
+          type: string
+        type: array
+      role:
+        type: string
+    type: object
+  model.RolePermissionRestoreResult:
+    properties:
+      menusAdded:
+        type: integer
+      menusRemoved:
+        type: integer
+      message:
+        type: string
+      mode:
+        type: string
+      rolesProcessed:
+        type: integer
     type: object
   model.RoleSub:
     properties:
@@ -1797,6 +1887,10 @@ definitions:
       name:
         description: 단계명
         type: string
+      remediation:
+        allOf:
+        - $ref: '#/definitions/model.RemediationGuide'
+        description: failed일 때만, CSP 콘솔에서의 조치 방법
       status:
         allOf:
         - $ref: '#/definitions/model.ValidationStepStatus'
@@ -3819,6 +3913,49 @@ paths:
       tags:
       - groups
   /api/groups/id/{groupId}/users:
+    delete:
+      consumes:
+      - application/json
+      description: 그룹에서 사용자 목록을 일괄 제거합니다. DB + Keycloak 그룹 동기화.
+      operationId: removeGroupUsers
+      parameters:
+      - description: 그룹 ID
+        in: path
+        name: groupId
+        required: true
+        type: integer
+      - description: 사용자 일괄 제거 요청
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.RemoveGroupUsersRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 그룹에서 사용자 일괄 제거 (Keycloak 동기화 포함)
+      tags:
+      - groups
     post:
       consumes:
       - application/json
@@ -6616,87 +6753,6 @@ paths:
       summary: Get role-CSP role mapping
       tags:
       - roles
-  /api/roles/csp-roles/id/{roleId}:
-    delete:
-      consumes:
-      - application/json
-      description: Delete a role
-      operationId: deleteCspRole
-      parameters:
-      - description: Role ID
-        in: path
-        name: roleId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "204":
-          description: No Content
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Delete csp role
-      tags:
-      - roles
-    put:
-      consumes:
-      - application/json
-      description: Update role information
-      operationId: updateCspRole
-      parameters:
-      - description: Role ID
-        in: path
-        name: roleId
-        required: true
-        type: string
-      - description: Role Info
-        in: body
-        name: role
-        required: true
-        schema:
-          $ref: '#/definitions/model.CreateRoleRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/model.RoleMaster'
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Update csp role
-      tags:
-      - roles
   /api/roles/csp-roles/list:
     post:
       consumes:
@@ -6734,7 +6790,180 @@ paths:
       summary: Get role-CSP role mapping
       tags:
       - roles
+  /api/roles/csp-roles/master:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        RoleMaster + RoleSub(csp)를 생성합니다. CreatePlatformRole/CreateWorkspaceRole과 대칭되는
+        csp 타입 전용 생성 API입니다. 대상 CSP의 실제 역할(CspRole 레코드)은 CreateCspRole로 별도 생성/매핑해야 합니다.
+      operationId: createCspRoleMaster
+      parameters:
+      - description: Role Info
+        in: body
+        name: role
+        required: true
+        schema:
+          $ref: '#/definitions/model.CreateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.RoleMaster'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create csp role master
+      tags:
+      - roles
+  /api/roles/csp-roles/master/id/{roleId}:
+    delete:
+      consumes:
+      - application/json
+      description: |-
+        RoleMaster의 csp 타입 RoleSub 태그를 삭제합니다(DeletePlatformRole/DeleteWorkspaceRole과 대칭).
+        RoleMaster 자체나 CspRole 레코드는 삭제하지 않습니다 — CspRole 레코드 삭제는 DeleteCspRole을 사용하세요.
+        이 역할에 CSP 역할 매핑이 남아있으면 삭제할 수 없습니다(먼저 매핑을 해제해야 합니다).
+      operationId: deleteCspRoleMaster
+      parameters:
+      - description: Role ID
+        in: path
+        name: roleId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete csp role master
+      tags:
+      - roles
+    put:
+      consumes:
+      - application/json
+      description: |-
+        RoleSub.RoleType이 csp인 RoleMaster(플랫폼 역할 정의: name/description/parentId)를 수정합니다.
+        CSP 클라우드 측 역할 레코드(mcmp_role_csp_roles)를 수정하는 UpdateCspRole(/api/roles/csp/id/{roleId})과는 다른 리소스입니다 — 혼동 방지를 위해 operationId를 updateCspRoleMaster로 분리했습니다.
+      operationId: updateCspRoleMaster
+      parameters:
+      - description: CSP-type Platform Role ID
+        in: path
+        name: roleId
+        required: true
+        type: string
+      - description: CSP-type Role Info
+        in: body
+        name: role
+        required: true
+        schema:
+          $ref: '#/definitions/model.CreateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.RoleMaster'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update CSP-type platform role (RoleMaster)
+      tags:
+      - roles
   /api/roles/csp/id/{roleId}:
+    delete:
+      consumes:
+      - application/json
+      description: |-
+        CspRole(mcmp_role_csp_roles) 레코드를 삭제합니다. 이 레코드를 참조하는 RoleMaster-CspRole
+        매핑을 먼저 정리한 뒤 레코드를 삭제하며, AWS인 경우 실제 클라우드 Role도 함께 삭제합니다.
+        RoleMaster/RoleSub(csp)는 건드리지 않습니다 — 그 삭제는 DeleteCspRoleMaster를 사용하세요.
+      operationId: deleteCspRole
+      parameters:
+      - description: CSP Role ID
+        in: path
+        name: roleId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete csp role
+      tags:
+      - roles
     get:
       consumes:
       - application/json
@@ -6768,6 +6997,49 @@ paths:
       security:
       - BearerAuth: []
       summary: Get csp role by ID
+      tags:
+      - roles
+    put:
+      consumes:
+      - application/json
+      description: |-
+        CspRole(mcmp_role_csp_roles) 레코드를 수정합니다. Name/Description/ExtendedConfig를 반영합니다.
+        AWS의 경우 클라우드 측 리소스는 건드리지 않고 DB만 갱신합니다(SAML saml_client_id 등 설정용).
+      operationId: updateCspRole
+      parameters:
+      - description: CSP Role ID
+        in: path
+        name: roleId
+        required: true
+        type: string
+      - description: CSP Role Info
+        in: body
+        name: role
+        required: true
+        schema:
+          $ref: '#/definitions/model.CreateCspRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.CspRole'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update CSP role
       tags:
       - roles
   /api/roles/csp/list:
@@ -7130,6 +7402,36 @@ paths:
       summary: List role master mappings
       tags:
       - roles
+  /api/roles/mappings/platform-roles/id/{roleId}/groups:
+    get:
+      description: 특정 플랫폼 역할이 할당된 그룹 목록을 조회합니다 (역할→그룹 역방향 조회).
+      operationId: listGroupsByPlatformRole
+      parameters:
+      - description: 역할 ID
+        in: path
+        name: roleId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.GroupPlatformRoleResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 특정 Platform Role이 부여된 그룹 목록 조회
+      tags:
+      - roles
   /api/roles/mappings/platform-roles/users/list:
     post:
       consumes:
@@ -7204,6 +7506,36 @@ paths:
       security:
       - BearerAuth: []
       summary: Get role master mappings
+      tags:
+      - roles
+  /api/roles/mappings/workspace-roles/id/{roleId}/groups:
+    get:
+      description: 특정 워크스페이스 역할이 할당된 그룹 목록을 조회합니다 (역할→그룹 역방향 조회).
+      operationId: listGroupsByWorkspaceRole
+      parameters:
+      - description: 역할 ID
+        in: path
+        name: roleId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.GroupWorkspaceRoleResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 특정 Workspace Role이 부여된 그룹 목록 조회
       tags:
       - roles
   /api/roles/mappings/workspace-roles/users/list:
@@ -7413,6 +7745,48 @@ paths:
       security:
       - BearerAuth: []
       summary: Get platform role by ID
+      tags:
+      - roles
+    put:
+      consumes:
+      - application/json
+      description: 'Update the details of an existing platform role (RoleMaster: name/description/parentId,
+        RoleSub type list)'
+      operationId: updatePlatformRole
+      parameters:
+      - description: Platform Role ID
+        in: path
+        name: roleId
+        required: true
+        type: string
+      - description: Platform Role Info
+        in: body
+        name: role
+        required: true
+        schema:
+          $ref: '#/definitions/model.CreateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.RoleMaster'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update platform role
       tags:
       - roles
   /api/roles/platform-roles/name/{roleName}:
@@ -7672,6 +8046,48 @@ paths:
       summary: Get workspace role by ID
       tags:
       - roles
+    put:
+      consumes:
+      - application/json
+      description: 'Update the details of an existing workspace role (RoleMaster:
+        name/description/parentId, RoleSub type list)'
+      operationId: updateWorkspaceRole
+      parameters:
+      - description: Workspace Role ID
+        in: path
+        name: roleId
+        required: true
+        type: string
+      - description: Workspace Role Info
+        in: body
+        name: role
+        required: true
+        schema:
+          $ref: '#/definitions/model.CreateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.RoleMaster'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update workspace role
+      tags:
+      - roles
   /api/roles/workspace-roles/list:
     post:
       consumes:
@@ -7734,6 +8150,49 @@ paths:
       summary: Get workspace role by Name
       tags:
       - roles
+  /api/setup/backup-role-permissions:
+    get:
+      description: 플랫폼 역할의 현재 메뉴(및 reserved ops/csp) 권한을 role-permission-backup 문서로
+        내보냅니다
+      operationId: backupRolePermissions
+      parameters:
+      - description: 'Comma-separated role names (default: all platform roles)'
+        in: query
+        name: roles
+        type: string
+      - description: 'Comma-separated sections (menus,operations,csps). Default: menus'
+        in: query
+        name: sections
+        type: string
+      - description: yaml or json (default yaml)
+        in: query
+        name: format
+        type: string
+      - description: If true, also write under asset/menu/backups/
+        in: query
+        name: save
+        type: boolean
+      produces:
+      - application/json
+      - application/yaml
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.RolePermissionBackup'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/model.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/model.Response'
+      security:
+      - BearerAuth: []
+      summary: Backup current role permissions from DB
+      tags:
+      - admin
   /api/setup/check-user-roles:
     get:
       consumes:
@@ -7792,10 +8251,12 @@ paths:
     get:
       consumes:
       - application/json
-      description: CSV 파일을 읽어서 메뉴 권한을 초기화합니다
+      deprecated: true
+      description: Deprecated. permission.csv로 메뉴 권한을 초기화합니다. 제거 예정이니 InitializeMenuPermissionsFromYAML을
+        사용하세요.
       operationId: initializeMenuPermissions
       parameters:
-      - description: CSV file path (optional, uses default if not provided)
+      - description: CSV file path (optional, default asset/menu/permission.csv)
         in: query
         name: filePath
         type: string
@@ -7816,7 +8277,39 @@ paths:
             $ref: '#/definitions/model.Response'
       security:
       - BearerAuth: []
-      summary: Initialize menu permissions from CSV
+      summary: Initialize menu permissions from CSV (deprecated)
+      tags:
+      - admin
+  /api/setup/initial-role-menu-permission-yaml:
+    get:
+      consumes:
+      - application/json
+      description: asset/menu/permission.yaml(permissions→role→menus|operations|csps)을
+        읽어 역할-메뉴 매핑을 DB에 시드합니다
+      operationId: initializeMenuPermissionsFromYAML
+      parameters:
+      - description: YAML file path (optional, default asset/menu/permission.yaml)
+        in: query
+        name: filePath
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/model.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/model.Response'
+      security:
+      - BearerAuth: []
+      summary: Initialize role-menu permissions from YAML
       tags:
       - admin
   /api/setup/projects/sync:
@@ -7879,6 +8372,52 @@ paths:
       summary: mc-infra-manager와 프로젝트 동기화 차이 조회
       tags:
       - projects
+  /api/setup/restore-role-permissions:
+    post:
+      consumes:
+      - application/json
+      - application/yaml
+      description: role-permission-backup YAML/JSON(또는 filePath)으로 역할 메뉴 권한을 복구합니다.
+        mode=additive|replace-role
+      operationId: restoreRolePermissions
+      parameters:
+      - description: additive (default) or replace-role
+        in: query
+        name: mode
+        type: string
+      - description: 'Comma-separated sections. Default: menus'
+        in: query
+        name: sections
+        type: string
+      - description: Local backup file path (if body empty)
+        in: query
+        name: filePath
+        type: string
+      - description: Backup document
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/model.RolePermissionBackup'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.RolePermissionRestoreResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/model.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/model.Response'
+      security:
+      - BearerAuth: []
+      summary: Restore role permissions from backup document
+      tags:
+      - admin
   /api/setup/sync-projects:
     post:
       consumes:

@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	"github.com/m-cmp/mc-iam-manager/constants"
 	"github.com/m-cmp/mc-iam-manager/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -360,4 +361,76 @@ func TestGetEffectiveWorkspaceRoles_MultipleGroupsSameWorkspace(t *testing.T) {
 		assert.Equal(t, ws.ID, r.WorkspaceID)
 		assert.Equal(t, ws.Name, r.WorkspaceName)
 	}
+}
+
+// ── GetRoleByID 타입 가드 단위 테스트 (IAM-TECH-021 확장) ──────────────────────
+// UpdatePlatformRole/UpdateWorkspaceRole/UpdateCspRoleMaster 핸들러가 요청 바디의
+// RoleTypes 대신 DB의 기존 RoleSub를 기준으로 타입을 검증하도록 바꾼 근거.
+// RoleMaster에는 타입이 없고 RoleSub가 타입을 가지며 다중일 수 있으므로,
+// roleId가 실제로 그 타입의 RoleSub를 가지고 있는지 DB로 확인해야 한다.
+
+func setupRoleServiceTestDBWithSubs(t *testing.T) *gorm.DB {
+	t.Helper()
+	db := setupRoleServiceTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.RoleSub{}))
+	return db
+}
+
+func seedRoleSub(t *testing.T, db *gorm.DB, roleID uint, roleType constants.IAMRoleType) {
+	t.Helper()
+	require.NoError(t, db.Create(&model.RoleSub{RoleID: roleID, RoleType: roleType}).Error)
+}
+
+// TC-ROLE-GBID-01: roleId가 요청한 타입의 RoleSub를 가지고 있으면 조회 성공
+func TestGetRoleByID_MatchingType_ReturnsRole(t *testing.T) {
+	db := setupRoleServiceTestDBWithSubs(t)
+	svc := NewRoleService(db)
+
+	role := seedRoleMaster(t, db, "csp-admin")
+	seedRoleSub(t, db, role.ID, constants.RoleTypeCSP)
+
+	found, err := svc.GetRoleByID(role.ID, constants.RoleTypeCSP)
+
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.Equal(t, role.ID, found.ID)
+}
+
+// TC-ROLE-GBID-02: roleId는 존재하지만 다른 타입으로만 등록된 경우 nil 반환
+// — 예: platform 타입 역할의 ID를 UpdateCspRoleMaster에 넣으면 다른 역할을
+// 건드리지 못하도록 nil(404)이어야 한다.
+func TestGetRoleByID_MismatchedType_ReturnsNil(t *testing.T) {
+	db := setupRoleServiceTestDBWithSubs(t)
+	svc := NewRoleService(db)
+
+	role := seedRoleMaster(t, db, "platform-admin")
+	seedRoleSub(t, db, role.ID, constants.RoleTypePlatform)
+
+	found, err := svc.GetRoleByID(role.ID, constants.RoleTypeCSP)
+
+	require.NoError(t, err)
+	assert.Nil(t, found, "다른 타입으로만 등록된 역할은 조회되지 않아야 함")
+}
+
+// TC-ROLE-GBID-03: 하나의 RoleMaster가 여러 RoleSub(다중 타입)를 가질 수 있고,
+// 그 중 하나만 일치해도 해당 타입 기준으로는 조회 성공해야 한다.
+func TestGetRoleByID_MultiTypeRole_MatchesEitherType(t *testing.T) {
+	db := setupRoleServiceTestDBWithSubs(t)
+	svc := NewRoleService(db)
+
+	role := seedRoleMaster(t, db, "platform-and-workspace-admin")
+	seedRoleSub(t, db, role.ID, constants.RoleTypePlatform)
+	seedRoleSub(t, db, role.ID, constants.RoleTypeWorkspace)
+
+	foundAsPlatform, err := svc.GetRoleByID(role.ID, constants.RoleTypePlatform)
+	require.NoError(t, err)
+	assert.NotNil(t, foundAsPlatform)
+
+	foundAsWorkspace, err := svc.GetRoleByID(role.ID, constants.RoleTypeWorkspace)
+	require.NoError(t, err)
+	assert.NotNil(t, foundAsWorkspace)
+
+	foundAsCsp, err := svc.GetRoleByID(role.ID, constants.RoleTypeCSP)
+	require.NoError(t, err)
+	assert.Nil(t, foundAsCsp, "csp 타입 RoleSub는 없으므로 nil이어야 함")
 }
