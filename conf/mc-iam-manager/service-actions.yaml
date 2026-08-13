@@ -333,7 +333,7 @@ serviceActions:
         _meta:
             version: 0.5.2
             repository: https://github.com/m-cmp/mc-iam-manager
-            generatedAt: "2026-07-28T08:00:50Z"
+            generatedAt: "2026-08-13T04:20:09Z"
         CreateFrameworkService:
             method: post
             resourcePath: /api/mcmp-apis
@@ -424,7 +424,7 @@ serviceActions:
             description: 사용자를 하나 이상의 그룹에 할당합니다. DB + Keycloak 그룹 동기화.
         assignUserOrganizations:
             method: post
-            resourcePath: /api/users/{userId}/organizations
+            resourcePath: /api/users/id/{userId}/organizations
             description: 사용자를 하나 이상의 조직에 할당합니다 (다중 소속 가능).
         assignWorkspaceRole:
             method: post
@@ -788,7 +788,7 @@ serviceActions:
             description: Get menu tree based on user's platform roles
         getUserOrganizations:
             method: get
-            resourcePath: /api/users/{userId}/organizations
+            resourcePath: /api/users/id/{userId}/organizations
             description: 사용자가 소속된 조직 목록을 조회합니다. hierarchy=true이면 path/level 포함.
         getUserWorkspaceAndWorkspaceRolesByUserID:
             method: get
@@ -1128,7 +1128,7 @@ serviceActions:
             description: Remove a user from a workspace
         removeUserOrganization:
             method: delete
-            resourcePath: /api/users/{userId}/organizations/{organizationId}
+            resourcePath: /api/users/id/{userId}/organizations/{organizationId}
             description: 사용자를 특정 조직에서 제거합니다.
         removeWorkspaceFromProject:
             method: delete
