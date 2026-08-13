@@ -331,9 +331,9 @@ serviceActions:
             description: ""
     mc-iam-manager:
         _meta:
-            version: 0.5.2
+            version: 0.6.2
             repository: https://github.com/m-cmp/mc-iam-manager
-            generatedAt: "2026-08-13T04:20:09Z"
+            generatedAt: "2026-08-13T05:00:00Z"
         CreateFrameworkService:
             method: post
             resourcePath: /api/mcmp-apis
@@ -434,6 +434,10 @@ serviceActions:
             method: post
             resourcePath: /api/csp-policies/attach
             description: Attach a CSP policy to a CSP role
+        backupRolePermissions:
+            method: get
+            resourcePath: /api/setup/backup-role-permissions
+            description: 플랫폼 역할의 현재 메뉴(및 reserved ops/csp) 권한을 role-permission-backup 문서로 내보냅니다
         bulkHealthCheckCspIdpConfigs:
             method: post
             resourcePath: /api/csp-idp-configs/health-check
@@ -470,6 +474,12 @@ serviceActions:
             method: post
             resourcePath: /api/roles/csp
             description: Create a new csp role
+        createCspRoleMaster:
+            method: post
+            resourcePath: /api/roles/csp-roles/master
+            description: 'RoleMaster + RoleSub(csp)를 생성합니다. CreatePlatformRole/CreateWorkspaceRole과 대칭되는
+            
+              csp 타입 전용 생성 API입니다. 대상 CSP의 실제 역할(CspRole 레코드)은 CreateCspRole로 별도 생성/매핑해야 합니다.'
         createCspRoles:
             method: post
             resourcePath: /api/roles/csp-roles/batch
@@ -556,8 +566,20 @@ serviceActions:
             description: Delete a CSP policy by ID
         deleteCspRole:
             method: delete
-            resourcePath: /api/roles/csp-roles/id/{roleId}
-            description: Delete a role
+            resourcePath: /api/roles/csp/id/{roleId}
+            description: 'CspRole(mcmp_role_csp_roles) 레코드를 삭제합니다. 이 레코드를 참조하는 RoleMaster-CspRole
+            
+              매핑을 먼저 정리한 뒤 레코드를 삭제하며, AWS인 경우 실제 클라우드 Role도 함께 삭제합니다.
+            
+              RoleMaster/RoleSub(csp)는 건드리지 않습니다 — 그 삭제는 DeleteCspRoleMaster를 사용하세요.'
+        deleteCspRoleMaster:
+            method: delete
+            resourcePath: /api/roles/csp-roles/master/id/{roleId}
+            description: 'RoleMaster의 csp 타입 RoleSub 태그를 삭제합니다(DeletePlatformRole/DeleteWorkspaceRole과 대칭).
+            
+              RoleMaster 자체나 CspRole 레코드는 삭제하지 않습니다 — CspRole 레코드 삭제는 DeleteCspRole을 사용하세요.
+            
+              이 역할에 CSP 역할 매핑이 남아있으면 삭제할 수 없습니다(먼저 매핑을 해제해야 합니다).'
         deleteMapping:
             method: delete
             resourcePath: /api/mcmp-api-permission-action-mappings/permissions/{permissionId}/actions/{actionId}
@@ -833,19 +855,11 @@ serviceActions:
         initializeMenuPermissions:
             method: get
             resourcePath: /api/setup/initial-role-menu-permission
-            description: "(Deprecated) CSV 파일을 읽어서 메뉴 권한을 초기화합니다. Use initializeMenuPermissionsFromYAML."
+            description: Deprecated. permission.csv로 메뉴 권한을 초기화합니다. 제거 예정이니 InitializeMenuPermissionsFromYAML을 사용하세요.
         initializeMenuPermissionsFromYAML:
             method: get
             resourcePath: /api/setup/initial-role-menu-permission-yaml
-            description: permission.yaml(permissions→role→menus|operations|csps)을 읽어 역할-메뉴 권한을 초기화합니다
-        backupRolePermissions:
-            method: get
-            resourcePath: /api/setup/backup-role-permissions
-            description: DB의 현재 플랫폼 역할 권한을 role-permission-backup 문서로 내보냅니다
-        restoreRolePermissions:
-            method: post
-            resourcePath: /api/setup/restore-role-permissions
-            description: role-permission-backup 문서로 역할 권한을 복구합니다 (additive|replace-role)
+            description: asset/menu/permission.yaml(permissions→role→menus|operations|csps)을 읽어 역할-메뉴 매핑을 DB에 시드합니다
         listAllInvitations:
             method: get
             resourcePath: /api/invitations
@@ -878,6 +892,14 @@ serviceActions:
             method: post
             resourcePath: /api/roles/csp-roles/list
             description: Get a mapping between role and CSP role
+        listGroupsByPlatformRole:
+            method: get
+            resourcePath: /api/roles/mappings/platform-roles/id/{roleId}/groups
+            description: 특정 플랫폼 역할이 할당된 그룹 목록을 조회합니다 (역할→그룹 역방향 조회).
+        listGroupsByWorkspaceRole:
+            method: get
+            resourcePath: /api/roles/mappings/workspace-roles/id/{roleId}/groups
+            description: 특정 워크스페이스 역할이 할당된 그룹 목록을 조회합니다 (역할→그룹 역방향 조회).
         listMappedMenusByRole:
             method: post
             resourcePath: /api/menus/platform-roles/list
@@ -1098,6 +1120,10 @@ serviceActions:
             method: delete
             resourcePath: /api/groups/id/{groupId}/users/{userId}
             description: 그룹에서 특정 사용자를 제거합니다. DB + Keycloak 그룹 동기화.
+        removeGroupUsers:
+            method: delete
+            resourcePath: /api/groups/id/{groupId}/users
+            description: 그룹에서 사용자 목록을 일괄 제거합니다. DB + Keycloak 그룹 동기화.
         removeGroupWorkspaceRole:
             method: delete
             resourcePath: /api/groups/id/{groupId}/workspaces/{workspaceId}
@@ -1146,6 +1172,10 @@ serviceActions:
             method: post
             resourcePath: /api/users/me/withdrawal
             description: Current user requests account withdrawal (ACTIVE → WITHDRAWAL_REQUESTED).
+        restoreRolePermissions:
+            method: post
+            resourcePath: /api/setup/restore-role-permissions
+            description: role-permission-backup YAML/JSON(또는 filePath)으로 역할 메뉴 권한을 복구합니다. mode=additive|replace-role
         sendWorkspaceInvitation:
             method: post
             resourcePath: /api/workspaces/id/{wsId}/invitations
@@ -1205,7 +1235,15 @@ serviceActions:
         updateCspRole:
             method: put
             resourcePath: /api/roles/csp/id/{roleId}
-            description: Update CSP role record (idp/iam identifiers, description, extended config)
+            description: 'CspRole(mcmp_role_csp_roles) 레코드를 수정합니다. Name/Description/ExtendedConfig를 반영합니다.
+            
+              AWS의 경우 클라우드 측 리소스는 건드리지 않고 DB만 갱신합니다(SAML saml_client_id 등 설정용).'
+        updateCspRoleMaster:
+            method: put
+            resourcePath: /api/roles/csp-roles/master/id/{roleId}
+            description: 'RoleSub.RoleType이 csp인 RoleMaster(플랫폼 역할 정의: name/description/parentId)를 수정합니다.
+            
+              CSP 클라우드 측 역할 레코드(mcmp_role_csp_roles)를 수정하는 UpdateCspRole(/api/roles/csp/id/{roleId})과는 다른 리소스입니다 — 혼동 방지를 위해 operationId를 updateCspRoleMaster로 분리했습니다.'
         updateGroupWorkspaceRole:
             method: put
             resourcePath: /api/groups/id/{groupId}/workspaces/{workspaceId}
@@ -1226,6 +1264,10 @@ serviceActions:
             method: put
             resourcePath: /api/organizations/id/{organizationId}
             description: 조직 정보를 수정합니다. 부모 변경 시 하위 조직 코드 자동 재생성.
+        updatePlatformRole:
+            method: put
+            resourcePath: /api/roles/platform-roles/id/{roleId}
+            description: 'Update the details of an existing platform role (RoleMaster: name/description/parentId, RoleSub type list)'
         updateProject:
             method: put
             resourcePath: /api/projects/{id}
@@ -1250,6 +1292,10 @@ serviceActions:
             method: put
             resourcePath: /api/workspaces/id/{workspaceId}
             description: Update the details of an existing workspace.
+        updateWorkspaceRole:
+            method: put
+            resourcePath: /api/roles/workspace-roles/id/{roleId}
+            description: 'Update the details of an existing workspace role (RoleMaster: name/description/parentId, RoleSub type list)'
         validateCspAccount:
             method: post
             resourcePath: /api/csp-accounts/id/{accountId}/validate
