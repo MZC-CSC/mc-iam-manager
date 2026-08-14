@@ -742,6 +742,22 @@ func (s *keycloakService) RefreshToken(ctx context.Context, refreshToken string)
 
 // --- Group Synchronization Methods ---
 
+// pickExactRealmRole selects the role whose name matches roleName exactly.
+//
+// Keycloak's realm-role `search` parameter is a SUBSTRING match, so searching
+// "viewer" also returns "billviewer". The list comes back sorted by name, so
+// taking roles[0] silently picks the wrong role whenever a longer name sorts
+// first — e.g. assigning "viewer" actually granted "billviewer".
+// Callers must therefore filter for an exact name match.
+func pickExactRealmRole(roles []*gocloak.Role, roleName string) *gocloak.Role {
+	for _, r := range roles {
+		if r != nil && r.Name != nil && *r.Name == roleName {
+			return r
+		}
+	}
+	return nil
+}
+
 // findGroupByName finds a group by name and returns its ID. Returns empty string if not found.
 func (s *keycloakService) findGroupByName(ctx context.Context, token, groupName string) (string, error) {
 	groups, err := config.KC.Client.GetGroups(ctx, token, config.KC.Realm, gocloak.GetGroupsParams{
@@ -1513,15 +1529,14 @@ func (s *keycloakService) AssignRealmRoleToUser(ctx context.Context, kcUserId, r
 	if err != nil {
 		return fmt.Errorf("failed to get realm role %s: %w", roleName, err)
 	}
-	if len(roles) == 0 {
+	// search 는 부분일치이므로 exact 이름으로 골라야 한다 (예: "viewer" 검색 → "billviewer" 도 매칭)
+	target := pickExactRealmRole(roles, roleName)
+	if target == nil {
 		return fmt.Errorf("realm role %s not found", roleName)
-	}
-	if len(roles) > 1 {
-		log.Printf("Warning: Found multiple roles matching '%s'. Using the first one.", roleName)
 	}
 
 	// Assign the role to the user
-	err = config.KC.Client.AddRealmRoleToUser(ctx, token.AccessToken, config.KC.Realm, kcUserId, []gocloak.Role{*roles[0]})
+	err = config.KC.Client.AddRealmRoleToUser(ctx, token.AccessToken, config.KC.Realm, kcUserId, []gocloak.Role{*target})
 	if err != nil {
 		return fmt.Errorf("failed to assign realm role %s to user %s: %w", roleName, kcUserId, err)
 	}
@@ -1714,16 +1729,14 @@ func (s *keycloakService) RemoveRealmRoleFromUser(ctx context.Context, kcUserId,
 	if err != nil {
 		return fmt.Errorf("failed to get realm role %s: %w", roleName, err)
 	}
-	if len(roles) == 0 {
+	target := pickExactRealmRole(roles, roleName)
+	if target == nil {
 		log.Printf("Realm role %s not found, skipping removal", roleName)
 		return nil
 	}
-	if len(roles) > 1 {
-		log.Printf("Warning: Found multiple roles matching '%s'. Using the first one.", roleName)
-	}
 
 	// Remove the role from the user
-	err = config.KC.Client.DeleteRealmRoleFromUser(ctx, token.AccessToken, config.KC.Realm, kcUserId, []gocloak.Role{*roles[0]})
+	err = config.KC.Client.DeleteRealmRoleFromUser(ctx, token.AccessToken, config.KC.Realm, kcUserId, []gocloak.Role{*target})
 	if err != nil {
 		return fmt.Errorf("failed to remove realm role %s from user %s: %w", roleName, kcUserId, err)
 	}
@@ -1841,12 +1854,13 @@ func (s *keycloakService) AddRealmRoleToGroup(ctx context.Context, groupName, ro
 	if err != nil {
 		return fmt.Errorf("failed to get realm role '%s': %w", roleName, err)
 	}
-	if len(roles) == 0 {
+	target := pickExactRealmRole(roles, roleName)
+	if target == nil {
 		return fmt.Errorf("realm role '%s' not found in Keycloak", roleName)
 	}
 
 	// Add role to group
-	if err := config.KC.Client.AddRealmRoleToGroup(ctx, token.AccessToken, config.KC.Realm, groupID, []gocloak.Role{*roles[0]}); err != nil {
+	if err := config.KC.Client.AddRealmRoleToGroup(ctx, token.AccessToken, config.KC.Realm, groupID, []gocloak.Role{*target}); err != nil {
 		return fmt.Errorf("failed to add realm role '%s' to group '%s': %w", roleName, groupName, err)
 	}
 
@@ -1882,13 +1896,14 @@ func (s *keycloakService) RemoveRealmRoleFromGroup(ctx context.Context, groupNam
 	if err != nil {
 		return fmt.Errorf("failed to get realm role '%s': %w", roleName, err)
 	}
-	if len(roles) == 0 {
+	target := pickExactRealmRole(roles, roleName)
+	if target == nil {
 		log.Printf("Realm role '%s' not found in Keycloak, skipping removal", roleName)
 		return nil
 	}
 
 	// Remove role from group
-	if err := config.KC.Client.DeleteRealmRoleFromGroup(ctx, token.AccessToken, config.KC.Realm, groupID, []gocloak.Role{*roles[0]}); err != nil {
+	if err := config.KC.Client.DeleteRealmRoleFromGroup(ctx, token.AccessToken, config.KC.Realm, groupID, []gocloak.Role{*target}); err != nil {
 		return fmt.Errorf("failed to remove realm role '%s' from group '%s': %w", roleName, groupName, err)
 	}
 
