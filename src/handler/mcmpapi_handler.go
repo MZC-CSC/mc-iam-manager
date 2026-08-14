@@ -38,7 +38,7 @@ func NewMcmpApiHandler(db *gorm.DB) *McmpApiHandler { // Accept db, remove servi
 // @Produce json
 // @Success 200 {object} map[string]string "message: Successfully triggered MCMP API sync"
 // @Failure 500 {object} map[string]string "message: Failed to trigger MCMP API sync"
-// @Router /api/mcmp-apis/syncMcmpAPIs [post]
+// @Router /api/setup/sync-mcmp-apis [post]
 // @Security BearerAuth
 // @Id syncMcmpAPIs
 func (h *McmpApiHandler) SyncMcmpAPIs(c echo.Context) error {
@@ -148,7 +148,7 @@ func (h *McmpApiHandler) SetActiveVersion(c echo.Context) error {
 // @Failure 404 {object} map[string]string "error: Service or action not found"
 // @Failure 500 {object} map[string]string "error: Internal server error or failed to call external API"
 // @Failure 503 {object} map[string]string "error: External API unavailable"
-// @Router /api/mcmp-apis/mcmpApiCall [post]
+// @Router /api/mcmp-apis/call [post]
 // @Security BearerAuth
 // @Id mcmpApiCall
 func (h *McmpApiHandler) McmpApiCall(c echo.Context) error { // Renamed function

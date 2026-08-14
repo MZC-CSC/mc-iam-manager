@@ -687,7 +687,7 @@ func (h *RoleHandler) RemoveRole(c echo.Context) error {
 // @Success 200 {array} model.RoleMaster
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
-// @Router /api/roles/menu-roles/list [post]
+// @Router /api/roles/platform-roles/list [post]
 // @Id listPlatformRoles
 func (h *RoleHandler) ListPlatformRoles(c echo.Context) error {
 	var req model.RoleFilterRequest
@@ -2168,7 +2168,7 @@ func (h *RoleHandler) AddCspRoleMappings(c echo.Context) error {
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
-// @Router /api/roles/unassign/csp-roles [delete]
+// @Router /api/roles/csp-roles [delete]
 // @Id removeCspRoleMappings
 func (h *RoleHandler) RemoveCspRoleMappings(c echo.Context) error {
 
@@ -2243,7 +2243,7 @@ func (h *RoleHandler) ListCspRoleMappings(c echo.Context) error {
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
-// @Router /api/roles/csp-roles/id/:roleId [get]
+// @Router /api/roles/csp-roles/id/{roleId} [get]
 // @Id getCspRoleMappingByRoleId
 func (h *RoleHandler) GetCspRoleMappings(c echo.Context) error {
 	roleID := c.Param("roleId")
@@ -2275,7 +2275,7 @@ func (h *RoleHandler) GetCspRoleMappings(c echo.Context) error {
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
-// @Router /api/roles/csp-roles/batch [post]
+// @Router /api/roles/csp/batch [post]
 // @Id createCspRoles
 func (h *RoleHandler) CreateCspRoles(c echo.Context) error {
 	var req model.CreateCspRolesRequest
@@ -2466,7 +2466,7 @@ func (h *RoleHandler) ListRoleMasterMappingsByCspRole(c echo.Context) error {
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
-// @Router /api/roles/mappings/role/id/:roleId [get]
+// @Router /api/roles/mappings/role/id/{roleId} [get]
 // @Id getRoleMasterMappings
 func (h *RoleHandler) GetRoleMasterMappings(c echo.Context) error {
 	roleID := c.Param("roleId")

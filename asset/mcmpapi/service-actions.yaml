@@ -333,7 +333,7 @@ serviceActions:
         _meta:
             version: 0.6.2
             repository: https://github.com/m-cmp/mc-iam-manager
-            generatedAt: "2026-08-13T05:00:00Z"
+            generatedAt: "2026-08-14T01:21:01Z"
         CreateFrameworkService:
             method: post
             resourcePath: /api/mcmp-apis
@@ -380,7 +380,7 @@ serviceActions:
             description: Add a project to a workspace
         addUserToWorkspace:
             method: post
-            resourcePath: /api/workspaces/{id}/users
+            resourcePath: /api/workspaces/id/{id}/users
             description: Add a user to a workspace
         addWorkspaceToProject:
             method: post
@@ -477,12 +477,12 @@ serviceActions:
         createCspRoleMaster:
             method: post
             resourcePath: /api/roles/csp-roles/master
-            description: 'RoleMaster + RoleSub(csp)를 생성합니다. CreatePlatformRole/CreateWorkspaceRole과 대칭되는
-            
-              csp 타입 전용 생성 API입니다. 대상 CSP의 실제 역할(CspRole 레코드)은 CreateCspRole로 별도 생성/매핑해야 합니다.'
+            description: |-
+                RoleMaster + RoleSub(csp)를 생성합니다. CreatePlatformRole/CreateWorkspaceRole과 대칭되는
+                csp 타입 전용 생성 API입니다. 대상 CSP의 실제 역할(CspRole 레코드)은 CreateCspRole로 별도 생성/매핑해야 합니다.
         createCspRoles:
             method: post
-            resourcePath: /api/roles/csp-roles/batch
+            resourcePath: /api/roles/csp/batch
             description: Create multiple new csp roles
         createMciamPermission:
             method: post
@@ -490,7 +490,7 @@ serviceActions:
             description: Create a new permission with the specified information.
         createMcmpApiPermissionActionMapping:
             method: post
-            resourcePath: /api/mcmp-api-permission-action-mappings
+            resourcePath: /api/mcmp-apis/permission-action-mappings
             description: Creates a new mapping between a permission and an API action
         createMenu:
             method: post
@@ -567,22 +567,20 @@ serviceActions:
         deleteCspRole:
             method: delete
             resourcePath: /api/roles/csp/id/{roleId}
-            description: 'CspRole(mcmp_role_csp_roles) 레코드를 삭제합니다. 이 레코드를 참조하는 RoleMaster-CspRole
-            
-              매핑을 먼저 정리한 뒤 레코드를 삭제하며, AWS인 경우 실제 클라우드 Role도 함께 삭제합니다.
-            
-              RoleMaster/RoleSub(csp)는 건드리지 않습니다 — 그 삭제는 DeleteCspRoleMaster를 사용하세요.'
+            description: |-
+                CspRole(mcmp_role_csp_roles) 레코드를 삭제합니다. 이 레코드를 참조하는 RoleMaster-CspRole
+                매핑을 먼저 정리한 뒤 레코드를 삭제하며, AWS인 경우 실제 클라우드 Role도 함께 삭제합니다.
+                RoleMaster/RoleSub(csp)는 건드리지 않습니다 — 그 삭제는 DeleteCspRoleMaster를 사용하세요.
         deleteCspRoleMaster:
             method: delete
             resourcePath: /api/roles/csp-roles/master/id/{roleId}
-            description: 'RoleMaster의 csp 타입 RoleSub 태그를 삭제합니다(DeletePlatformRole/DeleteWorkspaceRole과 대칭).
-            
-              RoleMaster 자체나 CspRole 레코드는 삭제하지 않습니다 — CspRole 레코드 삭제는 DeleteCspRole을 사용하세요.
-            
-              이 역할에 CSP 역할 매핑이 남아있으면 삭제할 수 없습니다(먼저 매핑을 해제해야 합니다).'
+            description: |-
+                RoleMaster의 csp 타입 RoleSub 태그를 삭제합니다(DeletePlatformRole/DeleteWorkspaceRole과 대칭).
+                RoleMaster 자체나 CspRole 레코드는 삭제하지 않습니다 — CspRole 레코드 삭제는 DeleteCspRole을 사용하세요.
+                이 역할에 CSP 역할 매핑이 남아있으면 삭제할 수 없습니다(먼저 매핑을 해제해야 합니다).
         deleteMapping:
             method: delete
-            resourcePath: /api/mcmp-api-permission-action-mappings/permissions/{permissionId}/actions/{actionId}
+            resourcePath: /api/mcmp-apis/permission-action-mappings/permissions/{permissionId}/actions/{actionId}
             description: Deletes a mapping between a permission and an API action
         deleteMciamPermission:
             method: delete
@@ -606,11 +604,11 @@ serviceActions:
             description: Delete a platform role
         deleteProject:
             method: delete
-            resourcePath: /api/projects/{id}
+            resourcePath: /api/projects/id/{projectId}
             description: Delete a project by its ID.
         deleteResourceType:
             method: delete
-            resourcePath: /api/resource-types/cloud-resources/framework/:frameworkId/id/:resourceTypeId
+            resourcePath: /api/resource-types/cloud-resources/framework/{frameworkId}/id/{resourceTypeId}
             description: 리소스 타입을 삭제합니다
         deleteRole:
             method: delete
@@ -642,7 +640,7 @@ serviceActions:
             description: 그룹에 아직 매핑되지 않은 워크스페이스 목록을 조회합니다.
         getCloudResourceTypeByID:
             method: get
-            resourcePath: /api/resource-types/cloud-resources/framework/:frameworkId/id/:resourceTypeId
+            resourcePath: /api/resource-types/cloud-resources/framework/{frameworkId}/id/{resourceTypeId}
             description: 특정 리소스 타입을 ID로 조회합니다
         getCompany:
             method: get
@@ -678,7 +676,7 @@ serviceActions:
             description: Get csp role details by Name
         getCspRoleMappingByRoleId:
             method: get
-            resourcePath: /api/roles/csp-roles/id/:roleId
+            resourcePath: /api/roles/csp-roles/id/{roleId}
             description: Get a mapping between role and CSP role
         getGroupPlatformRoles:
             method: get
@@ -693,7 +691,7 @@ serviceActions:
             resourcePath: /api/permissions/mciam/id/{id}
             description: Retrieve permission details by permission ID.
         getMenuByID:
-            method: post
+            method: get
             resourcePath: /api/menus/id/{menuId}
             description: Get menu details by ID
         getMyInfo:
@@ -734,7 +732,7 @@ serviceActions:
             description: 특정 조직에 소속된 사용자 목록을 조회합니다.
         getPlatformActionsByPermissionID:
             method: get
-            resourcePath: /api/mcmp-api-permission-action-mappings/platforms/id/{permissionId}/actions
+            resourcePath: /api/mcmp-apis/permission-action-mappings/platforms/id/{permissionId}/actions
             description: Returns all platform actions mapped to a specific permission
         getPlatformRoleByID:
             method: get
@@ -750,7 +748,7 @@ serviceActions:
             description: Get the policy document content
         getProjectByID:
             method: get
-            resourcePath: /api/projects/{id}
+            resourcePath: /api/projects/id/{projectId}
             description: Retrieve project details by project ID.
         getProjectByName:
             method: get
@@ -774,7 +772,7 @@ serviceActions:
             description: Retrieve role details by role name.
         getRoleMasterMappings:
             method: get
-            resourcePath: /api/roles/mappings/role/id/:roleId
+            resourcePath: /api/roles/mappings/role/id/{roleId}
             description: Get role master mappings
         getRoleMciamPermissions:
             method: get
@@ -804,10 +802,6 @@ serviceActions:
             method: get
             resourcePath: /api/users/id/{userId}/effective-platform-roles
             description: 사용자에게 직접 할당된 역할과 소속 그룹을 통해 상속된 역할을 중복 제거하여 반환합니다.
-        getUserMenuTree:
-            method: get
-            resourcePath: /api/menus/user-menu-tree
-            description: Get menu tree based on user's platform roles
         getUserOrganizations:
             method: get
             resourcePath: /api/users/id/{userId}/organizations
@@ -926,15 +920,15 @@ serviceActions:
             description: 전체 조직 목록을 조회합니다. tree=true이면 Tree 구조로 반환. name/code로 검색 가능 (검색 시 tree 파라미터 무시).
         listPermissionsByActionID:
             method: get
-            resourcePath: /api/mcmp-api-permission-action-mappings/actions/{actionId}/permissions
+            resourcePath: /api/mcmp-apis/permission-action-mappings/actions/{actionId}/permissions
             description: Returns all permissions mapped to a specific API action
         listPlatformActions:
             method: post
-            resourcePath: /api/mcmp-api-permission-action-mappings/list
+            resourcePath: /api/mcmp-apis/permission-action-mappings/list
             description: Returns all platform actions mapped to a specific permission
         listPlatformRoles:
             method: post
-            resourcePath: /api/roles/menu-roles/list
+            resourcePath: /api/roles/platform-roles/list
             description: Get a list of all menu roles
         listProjects:
             method: post
@@ -997,8 +991,8 @@ serviceActions:
             resourcePath: /api/roles/mappings/workspace-roles/users/list
             description: List users by workspace role
         listWorkspaceActionsByPermissionID:
-            method: post
-            resourcePath: /api/mcmp-api-permission-action-mappings/actions/list
+            method: get
+            resourcePath: /api/mcmp-apis/permission-action-mappings/workspaces/id/{permissionId}/actions
             description: Returns all workspace actions mapped to a specific permission
         listWorkspaceInvitations:
             method: get
@@ -1028,18 +1022,6 @@ serviceActions:
             method: get
             resourcePath: /readyz
             description: Check the health status of the service.
-        mciamCreateCredential:
-            method: post
-            resourcePath: /api/csp-credentials
-            description: 새로운 CSP 인증 정보를 생성합니다
-        mciamDeleteCredential:
-            method: delete
-            resourcePath: /api/csp-credentials/{id}
-            description: CSP 인증 정보를 삭제합니다
-        mciamGetCredentialByID:
-            method: get
-            resourcePath: /api/csp-credentials/{id}
-            description: 특정 CSP 인증 정보를 ID로 조회합니다
         mciamGetTempCredentialProviders:
             method: get
             resourcePath: /api/auth/temp-credential-csps
@@ -1048,10 +1030,6 @@ serviceActions:
             method: post
             resourcePath: /api/workspaces/temporary-credentials
             description: Get temporary credentials for CSP
-        mciamListCredentials:
-            method: get
-            resourcePath: /api/csp-credentials
-            description: 모든 CSP 인증 정보 목록을 조회합니다
         mciamLogin:
             method: post
             resourcePath: /api/auth/login
@@ -1064,10 +1042,6 @@ serviceActions:
             method: post
             resourcePath: /api/auth/refresh
             description: Refresh JWT access token using a valid refresh token.
-        mciamUpdateCredential:
-            method: put
-            resourcePath: /api/csp-credentials/{id}
-            description: CSP 인증 정보를 업데이트합니다
         mciamValidateCredentials:
             method: post
             resourcePath: /api/workspaces/credentials/validate
@@ -1082,7 +1056,7 @@ serviceActions:
             description: Set workspace ticket
         mcmpApiCall:
             method: post
-            resourcePath: /api/mcmp-apis/mcmpApiCall
+            resourcePath: /api/mcmp-apis/call
             description: Executes a defined MCMP API action with parameters structured in McmpApiCallRequest.
         moveOrganization:
             method: put
@@ -1094,11 +1068,11 @@ serviceActions:
             description: 'Admin processes a withdrawal request: removes all role/org mappings and disables in Keycloak.'
         registerMenusFromBody:
             method: post
-            resourcePath: /api/menus/setup/initial-menus2
+            resourcePath: /api/setup/initial-menus2
             description: 'Parse YAML text in the request body and register or update menus in the database. Recommended Content-Type: text/plain, text/yaml, application/yaml.'
         registerMenusFromYAML:
             method: post
-            resourcePath: /api/menus/setup/initial-menus
+            resourcePath: /api/setup/initial-menus
             description: Register or update menus from a local YAML file specified by the filePath query parameter, or from the MC_WEB_CONSOLE_MENUYAML URL in .env if not provided. If loaded from URL, the file is saved to asset/menu/menu.yaml.
         rejectInvitation:
             method: put
@@ -1110,7 +1084,7 @@ serviceActions:
             description: Admin rejects a workspace invitation
         removeCspRoleMappings:
             method: delete
-            resourcePath: /api/roles/unassign/csp-roles
+            resourcePath: /api/roles/csp-roles
             description: Delete a mapping between workspace role and CSP role
         removeGroupPlatformRole:
             method: delete
@@ -1150,7 +1124,7 @@ serviceActions:
             description: 사용자를 특정 그룹에서 제거합니다. DB + Keycloak 그룹 동기화.
         removeUserFromWorkspace:
             method: delete
-            resourcePath: /api/workspaces/{id}/users/{userId}
+            resourcePath: /api/workspaces/id/{id}/users/{userId}
             description: Remove a user from a workspace
         removeUserOrganization:
             method: delete
@@ -1198,7 +1172,7 @@ serviceActions:
             description: Synchronize policies from the CSP cloud
         syncMcmpAPIs:
             method: post
-            resourcePath: /api/mcmp-apis/syncMcmpAPIs
+            resourcePath: /api/setup/sync-mcmp-apis
             description: Triggers the synchronization of MCMP API definitions from the configured YAML URL to the database.
         syncProjects:
             method: post
@@ -1235,22 +1209,22 @@ serviceActions:
         updateCspRole:
             method: put
             resourcePath: /api/roles/csp/id/{roleId}
-            description: 'CspRole(mcmp_role_csp_roles) 레코드를 수정합니다. Name/Description/ExtendedConfig를 반영합니다.
-            
-              AWS의 경우 클라우드 측 리소스는 건드리지 않고 DB만 갱신합니다(SAML saml_client_id 등 설정용).'
+            description: |-
+                CspRole(mcmp_role_csp_roles) 레코드를 수정합니다. Name/Description/ExtendedConfig를 반영합니다.
+                AWS의 경우 클라우드 측 리소스는 건드리지 않고 DB만 갱신합니다(SAML saml_client_id 등 설정용).
         updateCspRoleMaster:
             method: put
             resourcePath: /api/roles/csp-roles/master/id/{roleId}
-            description: 'RoleSub.RoleType이 csp인 RoleMaster(플랫폼 역할 정의: name/description/parentId)를 수정합니다.
-            
-              CSP 클라우드 측 역할 레코드(mcmp_role_csp_roles)를 수정하는 UpdateCspRole(/api/roles/csp/id/{roleId})과는 다른 리소스입니다 — 혼동 방지를 위해 operationId를 updateCspRoleMaster로 분리했습니다.'
+            description: |-
+                RoleSub.RoleType이 csp인 RoleMaster(플랫폼 역할 정의: name/description/parentId)를 수정합니다.
+                CSP 클라우드 측 역할 레코드(mcmp_role_csp_roles)를 수정하는 UpdateCspRole(/api/roles/csp/id/{roleId})과는 다른 리소스입니다 — 혼동 방지를 위해 operationId를 updateCspRoleMaster로 분리했습니다.
         updateGroupWorkspaceRole:
             method: put
             resourcePath: /api/groups/id/{groupId}/workspaces/{workspaceId}
             description: 그룹-워크스페이스 매핑의 역할을 변경합니다.
         updateMapping:
             method: put
-            resourcePath: /api/mcmp-api-permission-action-mappings/permissions/{permissionId}/actions/{actionId}
+            resourcePath: /api/mcmp-apis/permission-action-mappings/permissions/{permissionId}/actions/{actionId}
             description: Updates an existing mapping between a permission and an API action
         updateMciamPermission:
             method: put
@@ -1270,11 +1244,11 @@ serviceActions:
             description: 'Update the details of an existing platform role (RoleMaster: name/description/parentId, RoleSub type list)'
         updateProject:
             method: put
-            resourcePath: /api/projects/{id}
+            resourcePath: /api/projects/id/{projectId}
             description: Update the details of an existing project.
         updateResourceType:
             method: put
-            resourcePath: /api/resource-types/cloud-resources/framework/:frameworkId/id/:resourceTypeId
+            resourcePath: /api/resource-types/cloud-resources/framework/{frameworkId}/id/{resourceTypeId}
             description: 리소스 타입 정보를 업데이트합니다
         updateRole:
             method: put
