@@ -425,19 +425,73 @@ func (s *OrganizationService) DeleteOrganization(ctx context.Context, id uint) e
 // --- 사용자-조직 매핑 ---
 
 // AssignUserToOrganizations 사용자를 조직에 할당 (다중)
-func (s *OrganizationService) AssignUserToOrganizations(userID uint, orgIDs []uint) error {
-	// 조직 존재 확인
+func (s *OrganizationService) AssignUserToOrganizations(ctx context.Context, userID uint, orgIDs []uint) error {
+	// 조직 존재 확인 (Keycloak 그룹명으로 쓸 이름을 함께 확보)
+	orgs := make([]*model.Organization, 0, len(orgIDs))
 	for _, orgID := range orgIDs {
-		if _, err := s.orgRepo.FindByID(orgID); err != nil {
+		org, err := s.orgRepo.FindByID(orgID)
+		if err != nil {
 			return fmt.Errorf("organization not found: %d", orgID)
 		}
+		orgs = append(orgs, org)
 	}
-	return s.orgRepo.AssignUserToOrganizations(userID, orgIDs)
+
+	if err := s.orgRepo.AssignUserToOrganizations(userID, orgIDs); err != nil {
+		return err
+	}
+
+	// Keycloak 그룹 동기화 — 그룹에 배정된 platform role은 Keycloak이 그룹 멤버의
+	// 토큰(realm_access.roles)에 합성해 주는 방식으로만 집행된다. DB만 기록하면
+	// 조회 API는 상속됐다고 응답하지만 실제 권한은 오르지 않는다.
+	kcUserID := s.resolveUserKcID(userID)
+	if kcUserID == "" {
+		return nil
+	}
+	for _, org := range orgs {
+		if err := s.kcService.EnsureGroupExistsAndAssignUser(ctx, kcUserID, org.Name); err != nil {
+			return fmt.Errorf("failed to assign user to keycloak group '%s': %w", org.Name, err)
+		}
+	}
+	return nil
 }
 
-// RemoveUserFromOrganization 사용자-조직 매핑 제거
-func (s *OrganizationService) RemoveUserFromOrganization(userID, orgID uint) error {
-	return s.orgRepo.RemoveUserFromOrganization(userID, orgID)
+// RemoveUserFromOrganization 사용자-조직 매핑 제거 (DB + Keycloak 동기화)
+//
+// DB 제거를 먼저 수행한다. 조직 조회를 앞에 두면 미존재 조직에 대해
+// ErrUserOrganizationNotFound(404) 대신 "organization not found"가 반환되어
+// 기존 응답 계약이 깨진다.
+func (s *OrganizationService) RemoveUserFromOrganization(ctx context.Context, userID, orgID uint) error {
+	if err := s.orgRepo.RemoveUserFromOrganization(userID, orgID); err != nil {
+		return err
+	}
+
+	kcUserID := s.resolveUserKcID(userID)
+	if kcUserID == "" {
+		return nil
+	}
+
+	// Keycloak 그룹명은 조직 이름이므로 제거 후 조회한다.
+	org, err := s.orgRepo.FindByID(orgID)
+	if err != nil {
+		log.Printf("[WARN] DB에서 사용자 %d를 조직 %d에서 제거했으나 조직 조회 실패로 Keycloak 그룹 동기화를 건너뜀: %v", userID, orgID, err)
+		return nil
+	}
+
+	if err := s.kcService.RemoveUserFromGroup(ctx, kcUserID, org.Name); err != nil {
+		return fmt.Errorf("keycloak group removal failed (DB already updated): %w", err)
+	}
+	return nil
+}
+
+// resolveUserKcID 사용자의 Keycloak ID를 조회한다. 조회 실패 시 빈 문자열을 반환하며,
+// 호출부는 이를 "Keycloak 동기화 대상 아님"으로 처리한다.
+// (GroupRoleService.AssignUsersToGroup과 동일한 가드 패턴)
+func (s *OrganizationService) resolveUserKcID(userID uint) string {
+	var user model.User
+	if err := s.db.First(&user, userID).Error; err != nil {
+		return ""
+	}
+	return user.KcId
 }
 
 // GetUserOrganizations 사용자가 소속된 조직 목록 조회 (계층 정보 포함)
@@ -485,13 +539,16 @@ func (s *OrganizationService) GetUserOrganizationsWithHierarchy(userID uint) ([]
 	return result, nil
 }
 
-// ReplaceUserGroups 사용자의 그룹 멤버십을 전체 교체 (기존 제거 후 신규 할당)
-func (s *OrganizationService) ReplaceUserGroups(userID uint, groupIDs []uint) error {
-	// 신규 그룹 존재 확인
+// ReplaceUserGroups 사용자의 그룹 멤버십을 전체 교체 (기존 제거 후 신규 할당, DB + Keycloak 동기화)
+func (s *OrganizationService) ReplaceUserGroups(ctx context.Context, userID uint, groupIDs []uint) error {
+	// 신규 그룹 존재 확인 (Keycloak 그룹명으로 쓸 이름을 함께 확보)
+	newOrgs := make([]*model.Organization, 0, len(groupIDs))
 	for _, gID := range groupIDs {
-		if _, err := s.orgRepo.FindByID(gID); err != nil {
+		org, err := s.orgRepo.FindByID(gID)
+		if err != nil {
 			return fmt.Errorf("group not found: %d", gID)
 		}
+		newOrgs = append(newOrgs, org)
 	}
 
 	// 기존 그룹 조회
@@ -499,6 +556,8 @@ func (s *OrganizationService) ReplaceUserGroups(userID uint, groupIDs []uint) er
 	if err != nil {
 		return err
 	}
+
+	kcUserID := s.resolveUserKcID(userID)
 
 	// 기존 그룹 제거
 	for _, org := range currentOrgs {
@@ -508,11 +567,25 @@ func (s *OrganizationService) ReplaceUserGroups(userID uint, groupIDs []uint) er
 				return err
 			}
 		}
+		if kcUserID != "" {
+			if err := s.kcService.RemoveUserFromGroup(ctx, kcUserID, org.Name); err != nil {
+				return fmt.Errorf("keycloak group removal failed for '%s' (DB already updated): %w", org.Name, err)
+			}
+		}
 	}
 
 	// 신규 그룹 할당
 	if len(groupIDs) > 0 {
-		return s.orgRepo.AssignUserToOrganizations(userID, groupIDs)
+		if err := s.orgRepo.AssignUserToOrganizations(userID, groupIDs); err != nil {
+			return err
+		}
+		if kcUserID != "" {
+			for _, org := range newOrgs {
+				if err := s.kcService.EnsureGroupExistsAndAssignUser(ctx, kcUserID, org.Name); err != nil {
+					return fmt.Errorf("failed to assign user to keycloak group '%s': %w", org.Name, err)
+				}
+			}
+		}
 	}
 	return nil
 }
