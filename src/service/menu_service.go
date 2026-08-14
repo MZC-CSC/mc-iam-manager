@@ -39,7 +39,9 @@ func normalizeMenuResource(viewType, frameworkService, path string) (string, str
 	if viewType == "" {
 		viewType = defaultMenuViewType
 	}
-	if frameworkService == "" {
+	// iframe/popup 은 frameworkService 명시가 필수이므로 기본값을 채우면 안 된다 —
+	// 채우면 validateMenuResource의 "" 체크가 무력화돼 누락을 못 잡는다.
+	if frameworkService == "" && viewType == defaultMenuViewType {
 		frameworkService = defaultMenuFrameworkService
 	}
 	return viewType, frameworkService, path
