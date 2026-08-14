@@ -125,7 +125,7 @@ func (h *ProjectHandler) ListProjects(c echo.Context) error {
 // @Failure 404 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
-// @Router /api/projects/{id} [get]
+// @Router /api/projects/id/{projectId} [get]
 // @Id getProjectByID
 func (h *ProjectHandler) GetProjectByID(c echo.Context) error {
 	// Parse DB ID (uint) from path parameter
@@ -183,7 +183,7 @@ func (h *ProjectHandler) GetProjectByName(c echo.Context) error {
 // @Failure 404 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
-// @Router /api/projects/{id} [put]
+// @Router /api/projects/id/{projectId} [put]
 // @Id updateProject
 func (h *ProjectHandler) UpdateProject(c echo.Context) error {
 
@@ -229,7 +229,7 @@ func (h *ProjectHandler) UpdateProject(c echo.Context) error {
 // @Failure 404 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
-// @Router /api/projects/{id} [delete]
+// @Router /api/projects/id/{projectId} [delete]
 // @Id deleteProject
 func (h *ProjectHandler) DeleteProject(c echo.Context) error {
 

@@ -31,7 +31,7 @@ func NewMcmpApiPermissionActionMappingHandler(db *gorm.DB) *McmpApiPermissionAct
 // @Produce json
 // @Param permissionId path string true "Permission ID"
 // @Success 200 {array} mcmpapi.McmpApiAction
-// @Router /api/mcmp-api-permission-action-mappings/list [post]
+// @Router /api/mcmp-apis/permission-action-mappings/list [post]
 // @Id listPlatformActions
 func (h *McmpApiPermissionActionMappingHandler) ListPlatformActions(c echo.Context) error {
 
@@ -48,10 +48,10 @@ func (h *McmpApiPermissionActionMappingHandler) ListPlatformActions(c echo.Conte
 // @Produce json
 // @Param permissionId path string true "Permission ID"
 // @Success 200 {array} mcmpapi.McmpApiAction
-// @Router /api/mcmp-api-permission-action-mappings/platforms/id/{permissionId}/actions [get]
+// @Router /api/mcmp-apis/permission-action-mappings/platforms/id/{permissionId}/actions [get]
 // @Id getPlatformActionsByPermissionID
 func (h *McmpApiPermissionActionMappingHandler) GetPlatformActionsByPermissionID(c echo.Context) error {
-	permissionID := c.Param("permission_id")
+	permissionID := c.Param("permissionId")
 	if permissionID == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "permission_id is required"})
 	}
@@ -72,10 +72,10 @@ func (h *McmpApiPermissionActionMappingHandler) GetPlatformActionsByPermissionID
 // @Produce json
 // @Param permissionId path string true "Permission ID"
 // @Success 200 {array} mcmpapi.McmpApiAction
-// @Router /api/mcmp-api-permission-action-mappings/actions/list [post]
+// @Router /api/mcmp-apis/permission-action-mappings/workspaces/id/{permissionId}/actions [get]
 // @Id listWorkspaceActionsByPermissionID
 func (h *McmpApiPermissionActionMappingHandler) ListWorkspaceActionsByPermissionID(c echo.Context) error {
-	permissionID := c.Param("permission_id")
+	permissionID := c.Param("permissionId")
 	if permissionID == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "permission_id is required"})
 	}
@@ -96,10 +96,10 @@ func (h *McmpApiPermissionActionMappingHandler) ListWorkspaceActionsByPermission
 // @Produce json
 // @Param actionId path int true "Action ID"
 // @Success 200 {array} string
-// @Router /api/mcmp-api-permission-action-mappings/actions/{actionId}/permissions [get]
+// @Router /api/mcmp-apis/permission-action-mappings/actions/{actionId}/permissions [get]
 // @Id listPermissionsByActionID
 func (h *McmpApiPermissionActionMappingHandler) ListPermissionsByActionID(c echo.Context) error {
-	actionIDStr := c.Param("action_id")
+	actionIDStr := c.Param("actionId")
 	if actionIDStr == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "action_id is required"})
 	}
@@ -125,7 +125,7 @@ func (h *McmpApiPermissionActionMappingHandler) ListPermissionsByActionID(c echo
 // @Produce json
 // @Param mapping body mcmpapi.McmpApiPermissionActionMapping true "Mapping to create"
 // @Success 204 "No Content"
-// @Router /api/mcmp-api-permission-action-mappings [post]
+// @Router /api/mcmp-apis/permission-action-mappings [post]
 // @Id createMcmpApiPermissionActionMapping
 func (h *McmpApiPermissionActionMappingHandler) CreateMcmpApiPermissionActionMapping(c echo.Context) error {
 	var request struct {
@@ -159,11 +159,11 @@ func (h *McmpApiPermissionActionMappingHandler) CreateMcmpApiPermissionActionMap
 // @Param permissionId path string true "Permission ID"
 // @Param actionId path int true "Action ID"
 // @Success 204 "No Content"
-// @Router /api/mcmp-api-permission-action-mappings/permissions/{permissionId}/actions/{actionId} [delete]
+// @Router /api/mcmp-apis/permission-action-mappings/permissions/{permissionId}/actions/{actionId} [delete]
 // @Id deleteMapping
 func (h *McmpApiPermissionActionMappingHandler) DeleteMapping(c echo.Context) error {
-	permissionID := c.Param("permission_id")
-	actionIDStr := c.Param("action_id")
+	permissionID := c.Param("permissionId")
+	actionIDStr := c.Param("actionId")
 
 	if permissionID == "" || actionIDStr == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "permission_id and action_id are required"})
@@ -192,11 +192,11 @@ func (h *McmpApiPermissionActionMappingHandler) DeleteMapping(c echo.Context) er
 // @Param actionId path int true "Action ID"
 // @Param mapping body mcmpapi.McmpApiPermissionActionMapping true "Updated mapping"
 // @Success 200 {object} map[string]string
-// @Router /api/mcmp-api-permission-action-mappings/permissions/{permissionId}/actions/{actionId} [put]
+// @Router /api/mcmp-apis/permission-action-mappings/permissions/{permissionId}/actions/{actionId} [put]
 // @Id updateMapping
 func (h *McmpApiPermissionActionMappingHandler) UpdateMapping(c echo.Context) error {
-	permissionID := c.Param("permission_id")
-	actionIDStr := c.Param("action_id")
+	permissionID := c.Param("permissionId")
+	actionIDStr := c.Param("actionId")
 
 	if permissionID == "" || actionIDStr == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "permission_id and action_id are required"})

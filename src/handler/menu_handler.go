@@ -319,7 +319,7 @@ func (h *MenuHandler) hasPermission(userRoles []string, requiredRole string) boo
 // @Param menuId path string true "Menu ID"
 // @Success 200 {object} model.Menu
 // @Security BearerAuth
-// @Router /api/menus/id/{menuId} [post]
+// @Router /api/menus/id/{menuId} [get]
 // @Id getMenuByID
 func (h *MenuHandler) GetMenuByID(c echo.Context) error {
 	id := c.Param("menuId")
@@ -541,7 +541,7 @@ func (h *MenuHandler) DeleteMenu(c echo.Context) error {
 // @Success 200 {object} map[string]string "message: Successfully registered menus from YAML"
 // @Failure 500 {object} map[string]string "error: 실패 메시지"
 // @Security BearerAuth
-// @Router /api/menus/setup/initial-menus [post]
+// @Router /api/setup/initial-menus [post]
 // @Id registerMenusFromYAML
 func (h *MenuHandler) RegisterMenusFromYAML(c echo.Context) error {
 	filePath := c.QueryParam("filePath") // 쿼리 파라미터로 파일 경로 받기 (선택 사항)
@@ -568,7 +568,7 @@ func (h *MenuHandler) RegisterMenusFromYAML(c echo.Context) error {
 // @Failure 400 {object} map[string]string "error: 잘못된 요청 본문 또는 YAML 형식 오류"
 // @Failure 500 {object} map[string]string "error: 서버 내부 오류"
 // @Security BearerAuth
-// @Router /api/menus/setup/initial-menus2 [post]
+// @Router /api/setup/initial-menus2 [post]
 // @Id registerMenusFromBody
 func (h *MenuHandler) RegisterMenusFromBody(c echo.Context) error {
 	bodyBytes, err := io.ReadAll(c.Request().Body)
@@ -713,8 +713,6 @@ func (h *MenuHandler) DeleteMenusRolesMapping(c echo.Context) error {
 // @Success 200 {array} model.MenuTreeNode
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
-// @Router /api/menus/user-menu-tree [get]
-// @Id getUserMenuTree
 func (h *MenuHandler) GetUserMenuTree(c echo.Context) error {
 	// Get platform roles from context (set by auth middleware)
 	platformRoles := c.Get("platform_roles").([]string)

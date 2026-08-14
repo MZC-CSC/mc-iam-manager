@@ -438,7 +438,7 @@ func main() {
 	{
 		mciamPermissions.POST("/list", permissionHandler.ListMciamPermissions)
 		mciamPermissions.POST("", permissionHandler.CreateMciamPermission, middleware.PlatformRoleMiddleware(middleware.Write))
-		mciamPermissions.GET("/id/:permissionId", permissionHandler.GetMciamPermissionByID)
+		mciamPermissions.GET("/id/:id", permissionHandler.GetMciamPermissionByID)
 		mciamPermissions.PUT("/:id", permissionHandler.UpdateMciamPermission, middleware.PlatformRoleMiddleware(middleware.Write))
 		mciamPermissions.DELETE("/:id", permissionHandler.DeleteMciamPermission, middleware.PlatformRoleMiddleware(middleware.Write))
 	}
@@ -464,10 +464,10 @@ func main() {
 	mcmpApiPermissionActionMappings := mcmpApis.Group("/permission-action-mappings")
 	{
 		mcmpApiPermissionActionMappings.POST("/list", mcmpApiPermissionActionMappingHandler.ListPlatformActions, middleware.PlatformRoleMiddleware(middleware.Read))
-		mcmpApiPermissionActionMappings.GET("/id/:id", mcmpApiPermissionActionMappingHandler.GetPlatformActionsByPermissionID, middleware.PlatformRoleMiddleware(middleware.Read))
+		mcmpApiPermissionActionMappings.GET("/platforms/id/:permissionId/actions", mcmpApiPermissionActionMappingHandler.GetPlatformActionsByPermissionID, middleware.PlatformRoleMiddleware(middleware.Read))
 		mcmpApiPermissionActionMappings.POST("", mcmpApiPermissionActionMappingHandler.CreateMcmpApiPermissionActionMapping, middleware.PlatformRoleMiddleware(middleware.Manage))
 
-		mcmpApiPermissionActionMappings.GET("/actions/list", mcmpApiPermissionActionMappingHandler.ListWorkspaceActionsByPermissionID, middleware.PlatformRoleMiddleware(middleware.Read))
+		mcmpApiPermissionActionMappings.GET("/workspaces/id/:permissionId/actions", mcmpApiPermissionActionMappingHandler.ListWorkspaceActionsByPermissionID, middleware.PlatformRoleMiddleware(middleware.Read))
 		mcmpApiPermissionActionMappings.GET("/actions/:actionId/permissions", mcmpApiPermissionActionMappingHandler.ListPermissionsByActionID, middleware.PlatformRoleMiddleware(middleware.Read))
 		mcmpApiPermissionActionMappings.PUT("/permissions/:permissionId/actions/:actionId", mcmpApiPermissionActionMappingHandler.UpdateMapping, middleware.PlatformRoleMiddleware(middleware.Manage))
 		mcmpApiPermissionActionMappings.DELETE("/permissions/:permissionId/actions/:actionId", mcmpApiPermissionActionMappingHandler.DeleteMapping, middleware.PlatformRoleMiddleware(middleware.Manage))
