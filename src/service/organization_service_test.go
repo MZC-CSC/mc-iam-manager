@@ -456,7 +456,7 @@ func TestDeleteOrganizationCascade_Success(t *testing.T) {
 func TestAssignUserToOrganizations_OrgNotFound(t *testing.T) {
 	svc, _ := newTestOrgService(t)
 
-	err := svc.AssignUserToOrganizations(1, []uint{99999})
+	err := svc.AssignUserToOrganizations(context.Background(), 1, []uint{99999})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "organization not found")
@@ -468,7 +468,7 @@ func TestAssignUserToOrganizations_Success(t *testing.T) {
 	org := createOrg(t, db, "01", "Dev", nil)
 	user := createOrgUser(t, db, "charlie", "kc-charlie-01")
 
-	err := svc.AssignUserToOrganizations(user.ID, []uint{org.ID})
+	err := svc.AssignUserToOrganizations(context.Background(), user.ID, []uint{org.ID})
 
 	require.NoError(t, err)
 
@@ -485,8 +485,8 @@ func TestAssignUserToOrganizations_Idempotent(t *testing.T) {
 	org := createOrg(t, db, "01", "Dev", nil)
 	user := createOrgUser(t, db, "diana", "kc-diana-01")
 
-	require.NoError(t, svc.AssignUserToOrganizations(user.ID, []uint{org.ID}))
-	require.NoError(t, svc.AssignUserToOrganizations(user.ID, []uint{org.ID}))
+	require.NoError(t, svc.AssignUserToOrganizations(context.Background(), user.ID, []uint{org.ID}))
+	require.NoError(t, svc.AssignUserToOrganizations(context.Background(), user.ID, []uint{org.ID}))
 
 	var count int64
 	db.Model(&model.UserOrganization{}).
@@ -501,7 +501,7 @@ func TestAssignUserToOrganizations_Idempotent(t *testing.T) {
 func TestRemoveUserFromOrganization_NotFound(t *testing.T) {
 	svc, _ := newTestOrgService(t)
 
-	err := svc.RemoveUserFromOrganization(1, 1)
+	err := svc.RemoveUserFromOrganization(context.Background(), 1, 1)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, repository.ErrUserOrganizationNotFound)
@@ -516,7 +516,7 @@ func TestRemoveUserFromOrganization_Success(t *testing.T) {
 		UserID: user.ID, OrganizationID: org.ID,
 	}).Error)
 
-	err := svc.RemoveUserFromOrganization(user.ID, org.ID)
+	err := svc.RemoveUserFromOrganization(context.Background(), user.ID, org.ID)
 
 	require.NoError(t, err)
 
@@ -539,7 +539,7 @@ func TestRemoveUserFromOrganization_Success(t *testing.T) {
 func TestReplaceUserGroups_GroupNotFound(t *testing.T) {
 	svc, _ := newTestOrgService(t)
 
-	err := svc.ReplaceUserGroups(1, []uint{99999})
+	err := svc.ReplaceUserGroups(context.Background(), 1, []uint{99999})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "group not found")

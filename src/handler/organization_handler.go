@@ -407,7 +407,7 @@ func (h *OrganizationHandler) AssignUserOrganizations(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	if err := h.orgService.AssignUserToOrganizations(uint(userID), req.OrganizationIDs); err != nil {
+	if err := h.orgService.AssignUserToOrganizations(c.Request().Context(), uint(userID), req.OrganizationIDs); err != nil {
 		if errors.Is(err, repository.ErrOrganizationNotFound) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
@@ -477,7 +477,7 @@ func (h *OrganizationHandler) ReplaceUserGroups(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	if err := h.orgService.ReplaceUserGroups(uint(userID), req.GroupIDs); err != nil {
+	if err := h.orgService.ReplaceUserGroups(c.Request().Context(), uint(userID), req.GroupIDs); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "사용자 그룹 멤버십이 교체되었습니다."})
@@ -505,7 +505,7 @@ func (h *OrganizationHandler) RemoveUserOrganization(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid organization ID"})
 	}
 
-	if err := h.orgService.RemoveUserFromOrganization(uint(userID), uint(orgID)); err != nil {
+	if err := h.orgService.RemoveUserFromOrganization(c.Request().Context(), uint(userID), uint(orgID)); err != nil {
 		if errors.Is(err, repository.ErrUserOrganizationNotFound) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "사용자가 해당 조직에 소속되어 있지 않습니다"})
 		}
