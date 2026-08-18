@@ -212,6 +212,52 @@ func TestGroupRoleAssignPlatformRole_UsesOrganizationCodeAsKeycloakGroupIdentifi
 	assert.Equal(t, "GR07-UNIQUE-CODE", spy.lastGroupName, "Keycloak 그룹 식별자는 organization_code여야 한다(Name 사용 시 회귀)")
 }
 
+// ── RemoveGroupPlatformRole — IAM-BUG-030 회귀 ───────────────────────────────
+
+// TC-GR-RPR-01: workspace 전용 역할 ID로 해제 시도 → ErrRoleMasterNotFound(404)
+// (배정 쪽(AssignGroupPlatformRole)은 이미 이 검증을 하는데 해제 쪽만 원시 조회로 남아있던 결함)
+func TestGroupRoleRemovePlatformRole_WrongRoleType(t *testing.T) {
+	svc, db := newTestGroupRoleService(t)
+	org := createGRTestOrg(t, db, "test-group-rpr01", "RPR01")
+
+	workspaceOnlyRole := &model.RoleMaster{Name: "workspace-only-rpr01"}
+	require.NoError(t, db.Create(workspaceOnlyRole).Error)
+	require.NoError(t, db.Create(&model.RoleSub{RoleID: workspaceOnlyRole.ID, RoleType: constants.RoleTypeWorkspace}).Error)
+
+	err := svc.RemoveGroupPlatformRole(context.Background(), org.ID, workspaceOnlyRole.ID)
+
+	require.Error(t, err)
+	assert.Equal(t, repository.ErrRoleMasterNotFound, err)
+}
+
+// TC-GR-RPR-02: 존재하지 않는 역할 ID로 해제 시도 → ErrRoleMasterNotFound(404)
+func TestGroupRoleRemovePlatformRole_RoleNotFound(t *testing.T) {
+	svc, db := newTestGroupRoleService(t)
+	org := createGRTestOrg(t, db, "test-group-rpr02", "RPR02")
+
+	err := svc.RemoveGroupPlatformRole(context.Background(), org.ID, 99999)
+
+	require.Error(t, err)
+	assert.Equal(t, repository.ErrRoleMasterNotFound, err)
+}
+
+// TC-GR-RPR-03: 정상 platform 역할 해제 — DB·Keycloak 모두 반영
+func TestGroupRoleRemovePlatformRole_Success(t *testing.T) {
+	svc, db := newTestGroupRoleService(t)
+	org := createGRTestOrg(t, db, "test-group-rpr03", "RPR03")
+	role := createGRTestRole(t, db, "role-rpr03")
+	spy := &realmRoleLifecycleSpy{realmRoleExists: true}
+	svc.kcService = spy
+	require.NoError(t, svc.AssignGroupPlatformRole(context.Background(), org.ID, role.ID))
+
+	err := svc.RemoveGroupPlatformRole(context.Background(), org.ID, role.ID)
+
+	require.NoError(t, err)
+	roles, listErr := svc.GetGroupPlatformRoles(org.ID)
+	require.NoError(t, listErr)
+	assert.Empty(t, roles)
+}
+
 // ── AssignGroupWorkspace — 순수 DB 메서드 ────────────────────────────────────
 
 // TC-GR-AGW-01: 워크스페이스가 존재하지 않는 경우 → ErrWorkspaceNotFound

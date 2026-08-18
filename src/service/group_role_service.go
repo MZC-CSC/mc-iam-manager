@@ -111,13 +111,13 @@ func (s *GroupRoleService) RemoveGroupPlatformRole(ctx context.Context, groupID,
 		return err
 	}
 
-	// 2. Role 이름 조회
-	var roleMaster model.RoleMaster
-	if err := s.db.First(&roleMaster, roleID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return repository.ErrRoleMasterNotFound
-		}
+	// 2. Role 조회 (platform 타입 역할만 그룹에서 해제 가능 — assign 쪽(:44-51)과 동일 검증)
+	role, err := s.roleRepo.FindRoleByRoleID(roleID, constants.RoleTypePlatform)
+	if err != nil {
 		return fmt.Errorf("role not found: %w", err)
+	}
+	if role == nil {
+		return repository.ErrRoleMasterNotFound
 	}
 
 	// 3. DB에서 삭제
@@ -126,7 +126,7 @@ func (s *GroupRoleService) RemoveGroupPlatformRole(ctx context.Context, groupID,
 	}
 
 	// 4. Keycloak에서 제거
-	if err := s.kcService.RemoveRealmRoleFromGroup(ctx, org.OrganizationCode, roleMaster.Name); err != nil {
+	if err := s.kcService.RemoveRealmRoleFromGroup(ctx, org.OrganizationCode, role.Name); err != nil {
 		return fmt.Errorf("keycloak role removal failed (DB already updated): %w", err)
 	}
 
