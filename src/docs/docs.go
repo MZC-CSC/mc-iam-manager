@@ -3959,7 +3959,7 @@ const docTemplate = `{
         },
         "/api/mcmp-apis/permission-action-mappings/list": {
             "post": {
-                "description": "Returns all platform actions mapped to a specific permission",
+                "description": "Not implemented — no backing service/repository method to list mappings without a permission ID filter. Use GetPlatformActionsByPermissionID instead.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3969,24 +3969,15 @@ const docTemplate = `{
                 "tags": [
                     "mcmp-api-permission-action-mappings"
                 ],
-                "summary": "List platform actions by permission ID",
+                "summary": "List all platform action mappings (not implemented)",
                 "operationId": "listPlatformActions",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Permission ID",
-                        "name": "permissionId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
-                    "200": {
-                        "description": "OK",
+                    "501": {
+                        "description": "Not Implemented",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/mcmpapi.McmpApiAction"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
                             }
                         }
                     }
