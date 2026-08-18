@@ -88,7 +88,7 @@ func (h *CspCredentialHandler) GetTemporaryCredentials(c echo.Context) error {
 		if errors.Is(err, service.ErrUserNotFound) || errors.Is(err, service.ErrWorkspaceNotFound) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 		}
-		if errors.Is(err, service.ErrNoCspRoleMappingFound) || strings.Contains(err.Error(), "user has no roles") {
+		if errors.Is(err, service.ErrNoCspRoleMappingFound) || errors.Is(err, service.ErrNoWorkspaceRoleAssigned) {
 			return c.JSON(http.StatusForbidden, map[string]string{"error": "No suitable CSP role mapping found for user in this workspace: " + err.Error()})
 		}
 		if errors.Is(err, service.ErrUnsupportedCspType) {
