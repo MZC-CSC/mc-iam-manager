@@ -238,6 +238,7 @@ func main() {
 		setup.GET("/backup-role-permissions", adminHandler.BackupRolePermissions, middleware.PlatformAdminMiddleware)
 		setup.POST("/restore-role-permissions", adminHandler.RestoreRolePermissions, middleware.PlatformAdminMiddleware)
 		setup.POST("/initial-organizations", organizationHandler.SetupInitialOrganizations, middleware.PlatformAdminMiddleware)
+		setup.POST("/migrate-kc-group-identifiers", organizationHandler.MigrateKeycloakGroupIdentifiers, middleware.PlatformAdminMiddleware)
 	}
 
 	// 워크스페이스 라우트

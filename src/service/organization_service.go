@@ -260,8 +260,8 @@ func (s *OrganizationService) DeleteOrganizationCascade(ctx context.Context, org
 	// Keycloak 그룹 정리 (DB는 이미 삭제됨, best-effort)
 	var kcErrs []error
 	for _, org := range subtree {
-		if err := s.kcService.DeleteGroup(ctx, org.Name); err != nil {
-			kcErrs = append(kcErrs, fmt.Errorf("group '%s': %w", org.Name, err))
+		if err := s.kcService.DeleteGroup(ctx, org.OrganizationCode); err != nil {
+			kcErrs = append(kcErrs, fmt.Errorf("group '%s': %w", org.OrganizationCode, err))
 		}
 	}
 	if len(kcErrs) > 0 {
@@ -416,7 +416,7 @@ func (s *OrganizationService) DeleteOrganization(ctx context.Context, id uint) e
 	}
 
 	// Keycloak 그룹 정리 (DB는 이미 삭제됨, best-effort)
-	if err := s.kcService.DeleteGroup(ctx, org.Name); err != nil {
+	if err := s.kcService.DeleteGroup(ctx, org.OrganizationCode); err != nil {
 		return fmt.Errorf("keycloak group cleanup failed (DB already updated): %w", err)
 	}
 	return nil
@@ -426,7 +426,7 @@ func (s *OrganizationService) DeleteOrganization(ctx context.Context, id uint) e
 
 // AssignUserToOrganizations 사용자를 조직에 할당 (다중)
 func (s *OrganizationService) AssignUserToOrganizations(ctx context.Context, userID uint, orgIDs []uint) error {
-	// 조직 존재 확인 (Keycloak 그룹명으로 쓸 이름을 함께 확보)
+	// 조직 존재 확인 (Keycloak 그룹 식별자로 쓸 organization_code를 함께 확보)
 	orgs := make([]*model.Organization, 0, len(orgIDs))
 	for _, orgID := range orgIDs {
 		org, err := s.orgRepo.FindByID(orgID)
@@ -448,8 +448,8 @@ func (s *OrganizationService) AssignUserToOrganizations(ctx context.Context, use
 		return nil
 	}
 	for _, org := range orgs {
-		if err := s.kcService.EnsureGroupExistsAndAssignUser(ctx, kcUserID, org.Name); err != nil {
-			return fmt.Errorf("failed to assign user to keycloak group '%s': %w", org.Name, err)
+		if err := s.kcService.EnsureGroupExistsAndAssignUser(ctx, kcUserID, org.OrganizationCode); err != nil {
+			return fmt.Errorf("failed to assign user to keycloak group '%s': %w", org.OrganizationCode, err)
 		}
 	}
 	return nil
@@ -470,14 +470,14 @@ func (s *OrganizationService) RemoveUserFromOrganization(ctx context.Context, us
 		return nil
 	}
 
-	// Keycloak 그룹명은 조직 이름이므로 제거 후 조회한다.
+	// Keycloak 그룹 식별자는 organization_code이므로 제거 후 조회한다.
 	org, err := s.orgRepo.FindByID(orgID)
 	if err != nil {
 		log.Printf("[WARN] DB에서 사용자 %d를 조직 %d에서 제거했으나 조직 조회 실패로 Keycloak 그룹 동기화를 건너뜀: %v", userID, orgID, err)
 		return nil
 	}
 
-	if err := s.kcService.RemoveUserFromGroup(ctx, kcUserID, org.Name); err != nil {
+	if err := s.kcService.RemoveUserFromGroup(ctx, kcUserID, org.OrganizationCode); err != nil {
 		return fmt.Errorf("keycloak group removal failed (DB already updated): %w", err)
 	}
 	return nil
@@ -541,7 +541,7 @@ func (s *OrganizationService) GetUserOrganizationsWithHierarchy(userID uint) ([]
 
 // ReplaceUserGroups 사용자의 그룹 멤버십을 전체 교체 (기존 제거 후 신규 할당, DB + Keycloak 동기화)
 func (s *OrganizationService) ReplaceUserGroups(ctx context.Context, userID uint, groupIDs []uint) error {
-	// 신규 그룹 존재 확인 (Keycloak 그룹명으로 쓸 이름을 함께 확보)
+	// 신규 그룹 존재 확인 (Keycloak 그룹 식별자로 쓸 organization_code를 함께 확보)
 	newOrgs := make([]*model.Organization, 0, len(groupIDs))
 	for _, gID := range groupIDs {
 		org, err := s.orgRepo.FindByID(gID)
@@ -568,8 +568,8 @@ func (s *OrganizationService) ReplaceUserGroups(ctx context.Context, userID uint
 			}
 		}
 		if kcUserID != "" {
-			if err := s.kcService.RemoveUserFromGroup(ctx, kcUserID, org.Name); err != nil {
-				return fmt.Errorf("keycloak group removal failed for '%s' (DB already updated): %w", org.Name, err)
+			if err := s.kcService.RemoveUserFromGroup(ctx, kcUserID, org.OrganizationCode); err != nil {
+				return fmt.Errorf("keycloak group removal failed for '%s' (DB already updated): %w", org.OrganizationCode, err)
 			}
 		}
 	}
@@ -581,8 +581,8 @@ func (s *OrganizationService) ReplaceUserGroups(ctx context.Context, userID uint
 		}
 		if kcUserID != "" {
 			for _, org := range newOrgs {
-				if err := s.kcService.EnsureGroupExistsAndAssignUser(ctx, kcUserID, org.Name); err != nil {
-					return fmt.Errorf("failed to assign user to keycloak group '%s': %w", org.Name, err)
+				if err := s.kcService.EnsureGroupExistsAndAssignUser(ctx, kcUserID, org.OrganizationCode); err != nil {
+					return fmt.Errorf("failed to assign user to keycloak group '%s': %w", org.OrganizationCode, err)
 				}
 			}
 		}
@@ -634,6 +634,29 @@ func (s *OrganizationService) LoadAndRegisterOrganizationsFromYAML(filePath stri
 
 	log.Printf("[INFO] Registered %d organizations from seed file", len(orgs))
 	return nil
+}
+
+// MigrateKeycloakGroupIdentifiers 각 조직의 Keycloak 그룹 식별자를 레거시 organization.Name
+// 기준에서 유일성이 보장되는 organization_code 기준으로 이관한다.
+//
+// organization.Name은 unique 제약이 없어 부모가 다른 동명 조직이 같은 Keycloak 그룹으로
+// 충돌할 수 있다(IAM-BUG-029) — 이미 organization_code로 배정/조회하도록 고친 코드가 배포된
+// 뒤, 기존에 Name으로 만들어진 그룹의 멤버십을 이어가려면 이 마이그레이션이 필요하다.
+// 조직별로 독립 처리하며 idempotent(이미 이관됐거나 애초에 그룹이 없으면 no-op)하다.
+// 일부 조직에서 실패해도 나머지는 계속 진행하고, 실패 목록을 반환한다.
+func (s *OrganizationService) MigrateKeycloakGroupIdentifiers(ctx context.Context) ([]string, error) {
+	var orgs []model.Organization
+	if err := s.db.Find(&orgs).Error; err != nil {
+		return nil, fmt.Errorf("failed to list organizations: %w", err)
+	}
+
+	var failures []string
+	for _, org := range orgs {
+		if err := s.kcService.MigrateGroupIdentifier(ctx, org.Name, org.OrganizationCode); err != nil {
+			failures = append(failures, fmt.Sprintf("org %d (%s -> %s): %v", org.ID, org.Name, org.OrganizationCode, err))
+		}
+	}
+	return failures, nil
 }
 
 // flattenOrganizationTree 중첩 시드 구조를 부모-우선(BFS) 순서의 Organization 슬라이스로 변환

@@ -462,6 +462,92 @@ func TestAssignUserToOrganizations_OrgNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "organization not found")
 }
 
+// kcGroupIdentifierSpy captures which Keycloak group identifier and migration
+// calls a test made — IAM-BUG-029 회귀 검증용(organization.Name은 unique 제약이
+// 없어 부모가 다른 동명 조직이 같은 KC 그룹으로 충돌할 수 있다).
+type kcGroupIdentifierSpy struct {
+	mockKeycloakService
+	lastGroupName    string
+	migrateCalls     []struct{ OldName, NewName string }
+	migrateErrForOrg map[string]error // keyed by oldName
+}
+
+func (s *kcGroupIdentifierSpy) EnsureGroupExistsAndAssignUser(ctx context.Context, kcUserId, groupName string) error {
+	s.lastGroupName = groupName
+	return nil
+}
+
+func (s *kcGroupIdentifierSpy) MigrateGroupIdentifier(ctx context.Context, oldName, newName string) error {
+	s.migrateCalls = append(s.migrateCalls, struct{ OldName, NewName string }{oldName, newName})
+	if s.migrateErrForOrg != nil {
+		if err, ok := s.migrateErrForOrg[oldName]; ok {
+			return err
+		}
+	}
+	return nil
+}
+
+// TC-AU-01B: IAM-BUG-029 회귀 — Keycloak 그룹 식별자로 organization_code를 써야 한다
+func TestAssignUserToOrganizations_UsesOrganizationCodeAsKeycloakGroupIdentifier(t *testing.T) {
+	svc, db := newTestOrgService(t)
+	org := createOrg(t, db, "AU01B-UNIQUE-CODE", "operator-group", nil)
+	user := createOrgUser(t, db, "au01b-user", "kc-au01b")
+	spy := &kcGroupIdentifierSpy{}
+	svc.kcService = spy
+
+	err := svc.AssignUserToOrganizations(context.Background(), user.ID, []uint{org.ID})
+
+	require.NoError(t, err)
+	assert.Equal(t, "AU01B-UNIQUE-CODE", spy.lastGroupName, "Keycloak 그룹 식별자는 organization_code여야 한다(Name 사용 시 회귀)")
+}
+
+// ── MigrateKeycloakGroupIdentifiers ──────────────────────────────────────────
+
+// TC-MKGI-01: 조직마다 (Name -> OrganizationCode) 마이그레이션을 1회씩 호출한다
+func TestMigrateKeycloakGroupIdentifiers_CallsPerOrganization(t *testing.T) {
+	svc, db := newTestOrgService(t)
+	orgA := createOrg(t, db, "MKGI01-A", "operator-group", nil)
+	orgB := createOrg(t, db, "MKGI01-B", "billing-group", nil)
+	spy := &kcGroupIdentifierSpy{}
+	svc.kcService = spy
+
+	failures, err := svc.MigrateKeycloakGroupIdentifiers(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, failures)
+	require.Len(t, spy.migrateCalls, 2)
+	got := map[string]string{}
+	for _, c := range spy.migrateCalls {
+		got[c.OldName] = c.NewName
+	}
+	assert.Equal(t, orgA.OrganizationCode, got[orgA.Name])
+	assert.Equal(t, orgB.OrganizationCode, got[orgB.Name])
+}
+
+// TC-MKGI-02: 한 조직에서 실패해도 나머지는 계속 진행하고, 실패는 목록으로 보고한다
+func TestMigrateKeycloakGroupIdentifiers_ContinuesPastFailures(t *testing.T) {
+	svc, db := newTestOrgService(t)
+	orgA := createOrg(t, db, "MKGI02-A", "conflict-group", nil)
+	orgB := createOrg(t, db, "MKGI02-B", "clean-group", nil)
+	spy := &kcGroupIdentifierSpy{
+		migrateErrForOrg: map[string]error{orgA.Name: assert.AnError},
+	}
+	svc.kcService = spy
+
+	failures, err := svc.MigrateKeycloakGroupIdentifiers(context.Background())
+
+	require.NoError(t, err, "개별 조직 실패가 전체 호출을 에러로 만들면 안 된다")
+	require.Len(t, spy.migrateCalls, 2, "실패한 조직 이후에도 나머지 조직을 계속 처리해야 한다")
+	require.Len(t, failures, 1)
+	assert.Contains(t, failures[0], orgA.Name)
+
+	names := map[string]bool{}
+	for _, c := range spy.migrateCalls {
+		names[c.OldName] = true
+	}
+	assert.True(t, names[orgB.Name], "실패한 orgA 이후에도 orgB는 시도됐어야 한다")
+}
+
 // TC-AU-02: 정상 할당 후 매핑 확인
 func TestAssignUserToOrganizations_Success(t *testing.T) {
 	svc, db := newTestOrgService(t)

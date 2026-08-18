@@ -8141,6 +8141,36 @@ paths:
       summary: Initialize role-menu permissions from YAML
       tags:
       - admin
+  /api/setup/migrate-kc-group-identifiers:
+    post:
+      description: 각 조직의 Keycloak 그룹 식별자를 레거시 조직명 기준에서 유일성이 보장되는 organization_code
+        기준으로 이관합니다(IAM-BUG-029). 멱등성 보장 — 여러 번 호출해도 안전합니다.
+      operationId: migrateKeycloakGroupIdentifiers
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "207":
+          description: 일부 조직 마이그레이션 실패 — errors 필드 참고
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Keycloak 그룹 식별자 마이그레이션
+      tags:
+      - organizations
   /api/setup/projects/sync:
     post:
       consumes:

@@ -43,6 +43,32 @@ func (h *OrganizationHandler) SetupInitialOrganizations(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"message": "기본 조직이 등록되었습니다."})
 }
 
+// MigrateKeycloakGroupIdentifiers godoc
+// @Summary Keycloak 그룹 식별자 마이그레이션
+// @Description 각 조직의 Keycloak 그룹 식별자를 레거시 조직명 기준에서 유일성이 보장되는 organization_code 기준으로 이관합니다(IAM-BUG-029). 멱등성 보장 — 여러 번 호출해도 안전합니다.
+// @Tags organizations
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Success 207 {object} map[string]interface{} "일부 조직 마이그레이션 실패 — errors 필드 참고"
+// @Failure 500 {object} map[string]string
+// @Security BearerAuth
+// @Router /api/setup/migrate-kc-group-identifiers [post]
+// @Id migrateKeycloakGroupIdentifiers
+func (h *OrganizationHandler) MigrateKeycloakGroupIdentifiers(c echo.Context) error {
+	failures, err := h.orgService.MigrateKeycloakGroupIdentifiers(c.Request().Context())
+	if err != nil {
+		log.Printf("[ERROR] MigrateKeycloakGroupIdentifiers failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	if len(failures) > 0 {
+		return c.JSON(http.StatusMultiStatus, map[string]interface{}{
+			"message": "일부 조직의 Keycloak 그룹 식별자 마이그레이션에 실패했습니다.",
+			"errors":  failures,
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "Keycloak 그룹 식별자 마이그레이션이 완료되었습니다."})
+}
+
 // CreateOrganization godoc
 // @Summary 조직 생성
 // @Description 플랫폼 관리자가 조직을 생성합니다. parent_id가 없으면 최상위 조직 생성.
