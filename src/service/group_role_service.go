@@ -55,7 +55,20 @@ func (s *GroupRoleService) AssignGroupPlatformRole(ctx context.Context, groupID,
 		return err
 	}
 
-	// 4. Keycloak: 그룹에 realm role 추가
+	// 4. Keycloak: realm role이 아직 없으면 생성(지연 생성 경로) — 사용자 배정(AssignPlatformRole)과 동일 방어
+	roleExists, err := s.kcService.CheckRealmRoleExists(ctx, role.Name)
+	if err != nil {
+		_ = s.groupRoleRepo.DeleteGroupPlatformRole(groupID, roleID)
+		return fmt.Errorf("failed to check keycloak realm role: %w", err)
+	}
+	if !roleExists {
+		if err := s.kcService.CreateRealmRoleAndWait(ctx, role.Name); err != nil {
+			_ = s.groupRoleRepo.DeleteGroupPlatformRole(groupID, roleID)
+			return fmt.Errorf("failed to create keycloak realm role: %w", err)
+		}
+	}
+
+	// 5. Keycloak: 그룹에 realm role 추가
 	if err := s.kcService.AddRealmRoleToGroup(ctx, org.Name, role.Name); err != nil {
 		// DB rollback
 		_ = s.groupRoleRepo.DeleteGroupPlatformRole(groupID, roleID)
