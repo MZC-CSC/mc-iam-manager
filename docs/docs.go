@@ -9488,6 +9488,51 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/setup/migrate-kc-group-identifiers": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "각 조직의 Keycloak 그룹 식별자를 레거시 조직명 기준에서 유일성이 보장되는 organization_code 기준으로 이관합니다(IAM-BUG-029). 멱등성 보장 — 여러 번 호출해도 안전합니다.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "organizations"
+                ],
+                "summary": "Keycloak 그룹 식별자 마이그레이션",
+                "operationId": "migrateKeycloakGroupIdentifiers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "207": {
+                        "description": "일부 조직 마이그레이션 실패 — errors 필드 참고",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/setup/projects/sync": {
             "post": {
                 "security": [

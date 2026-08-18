@@ -133,6 +133,7 @@ type realmRoleLifecycleSpy struct {
 	realmRoleExists      bool
 	createRealmRoleErr   error
 	addRealmRoleGroupErr error
+	lastGroupName        string
 }
 
 func (s *realmRoleLifecycleSpy) CheckRealmRoleExists(ctx context.Context, roleName string) (bool, error) {
@@ -147,6 +148,7 @@ func (s *realmRoleLifecycleSpy) CreateRealmRoleAndWait(ctx context.Context, role
 
 func (s *realmRoleLifecycleSpy) AddRealmRoleToGroup(ctx context.Context, groupName, roleName string) error {
 	s.calls = append(s.calls, "AddRealmRoleToGroup")
+	s.lastGroupName = groupName
 	return s.addRealmRoleGroupErr
 }
 
@@ -193,6 +195,21 @@ func TestGroupRoleAssignPlatformRole_RollsBackDBWhenRealmRoleCreateFails(t *test
 	roles, listErr := svc.GetGroupPlatformRoles(org.ID)
 	require.NoError(t, listErr)
 	assert.Empty(t, roles, "realm role 생성 실패 시 DB에 배정이 남아있으면 안 된다")
+}
+
+// TC-GR-APR-07: IAM-BUG-029 회귀 — Keycloak 그룹 식별자로 organization_code를 써야 한다
+// (organization.Name은 unique 제약이 없어 부모가 다른 동명 조직이 같은 KC 그룹으로 충돌할 수 있다)
+func TestGroupRoleAssignPlatformRole_UsesOrganizationCodeAsKeycloakGroupIdentifier(t *testing.T) {
+	svc, db := newTestGroupRoleService(t)
+	org := createGRTestOrg(t, db, "operator-group", "GR07-UNIQUE-CODE")
+	role := createGRTestRole(t, db, "role-apr07")
+	spy := &realmRoleLifecycleSpy{realmRoleExists: true}
+	svc.kcService = spy
+
+	err := svc.AssignGroupPlatformRole(context.Background(), org.ID, role.ID)
+
+	require.NoError(t, err)
+	assert.Equal(t, "GR07-UNIQUE-CODE", spy.lastGroupName, "Keycloak 그룹 식별자는 organization_code여야 한다(Name 사용 시 회귀)")
 }
 
 // ── AssignGroupWorkspace — 순수 DB 메서드 ────────────────────────────────────

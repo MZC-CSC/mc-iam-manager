@@ -69,7 +69,7 @@ func (s *GroupRoleService) AssignGroupPlatformRole(ctx context.Context, groupID,
 	}
 
 	// 5. Keycloak: 그룹에 realm role 추가
-	if err := s.kcService.AddRealmRoleToGroup(ctx, org.Name, role.Name); err != nil {
+	if err := s.kcService.AddRealmRoleToGroup(ctx, org.OrganizationCode, role.Name); err != nil {
 		// DB rollback
 		_ = s.groupRoleRepo.DeleteGroupPlatformRole(groupID, roleID)
 		return fmt.Errorf("failed to assign role to keycloak group: %w", err)
@@ -126,7 +126,7 @@ func (s *GroupRoleService) RemoveGroupPlatformRole(ctx context.Context, groupID,
 	}
 
 	// 4. Keycloak에서 제거
-	if err := s.kcService.RemoveRealmRoleFromGroup(ctx, org.Name, roleMaster.Name); err != nil {
+	if err := s.kcService.RemoveRealmRoleFromGroup(ctx, org.OrganizationCode, roleMaster.Name); err != nil {
 		return fmt.Errorf("keycloak role removal failed (DB already updated): %w", err)
 	}
 
@@ -198,8 +198,8 @@ func (s *GroupRoleService) AssignUserToGroups(ctx context.Context, userID uint, 
 
 		// Keycloak 그룹 동기화
 		if kcUserID != "" {
-			if err := s.kcService.EnsureGroupExistsAndAssignUser(ctx, kcUserID, org.Name); err != nil {
-				return fmt.Errorf("failed to assign user to keycloak group '%s': %w", org.Name, err)
+			if err := s.kcService.EnsureGroupExistsAndAssignUser(ctx, kcUserID, org.OrganizationCode); err != nil {
+				return fmt.Errorf("failed to assign user to keycloak group '%s': %w", org.OrganizationCode, err)
 			}
 		}
 	}
@@ -228,8 +228,8 @@ func (s *GroupRoleService) AssignUsersToGroup(ctx context.Context, groupID uint,
 
 		// Keycloak 동기화
 		if user.KcId != "" {
-			if err := s.kcService.EnsureGroupExistsAndAssignUser(ctx, user.KcId, org.Name); err != nil {
-				return fmt.Errorf("failed to assign user %d to keycloak group '%s': %w", userID, org.Name, err)
+			if err := s.kcService.EnsureGroupExistsAndAssignUser(ctx, user.KcId, org.OrganizationCode); err != nil {
+				return fmt.Errorf("failed to assign user %d to keycloak group '%s': %w", userID, org.OrganizationCode, err)
 			}
 		}
 	}
@@ -258,7 +258,7 @@ func (s *GroupRoleService) RemoveUsersFromGroup(ctx context.Context, groupID uin
 
 		// Keycloak 동기화
 		if user.KcId != "" {
-			if err := s.kcService.RemoveUserFromGroup(ctx, user.KcId, org.Name); err != nil {
+			if err := s.kcService.RemoveUserFromGroup(ctx, user.KcId, org.OrganizationCode); err != nil {
 				return fmt.Errorf("keycloak group removal failed for user %d (DB already updated): %w", userID, err)
 			}
 		}
@@ -305,7 +305,7 @@ func (s *GroupRoleService) RemoveUserFromGroup(ctx context.Context, userID, grou
 
 	// Keycloak 그룹에서 제거
 	if kcUserID != "" {
-		if err := s.kcService.RemoveUserFromGroup(ctx, kcUserID, org.Name); err != nil {
+		if err := s.kcService.RemoveUserFromGroup(ctx, kcUserID, org.OrganizationCode); err != nil {
 			return fmt.Errorf("keycloak group removal failed (DB already updated): %w", err)
 		}
 	}

@@ -94,6 +94,11 @@ type KeycloakService interface {
 	RemoveRealmRoleFromGroup(ctx context.Context, groupName, roleName string) error
 	// DeleteGroup deletes a Keycloak group by name (no-op if the group doesn't exist)
 	DeleteGroup(ctx context.Context, groupName string) error
+	// MigrateGroupIdentifier renames a Keycloak group from a legacy name-based
+	// identifier to a new one (e.g. organization_code). No-op if no group exists
+	// under oldName. Returns an error if a group already exists under both names
+	// (requires manual merge).
+	MigrateGroupIdentifier(ctx context.Context, oldName, newName string) error
 	// CheckSAMLClientConfig Keycloak SAML 클라이언트 존재 및 protocol mapper 구성 확인
 	CheckSAMLClientConfig(ctx context.Context, clientID string) (string, error)
 }
@@ -1936,6 +1941,51 @@ func (s *keycloakService) DeleteGroup(ctx context.Context, groupName string) err
 	}
 
 	log.Printf("Successfully deleted Keycloak group '%s'", groupName)
+	return nil
+}
+
+// MigrateGroupIdentifier renames a Keycloak group from a legacy identifier(oldName)
+// to the new one(newName) — e.g. moving from the (non-unique) organization name to
+// the (unique) organization_code. No-op if no group exists under oldName; if a group
+// already exists under BOTH names, that requires a manual merge and is reported as
+// an error rather than guessed at automatically.
+func (s *keycloakService) MigrateGroupIdentifier(ctx context.Context, oldName, newName string) error {
+	if oldName == "" || newName == "" || oldName == newName {
+		return nil
+	}
+	if config.KC == nil || config.KC.Client == nil {
+		return fmt.Errorf("keycloak configuration not initialized")
+	}
+
+	token, err := config.KC.GetAdminToken(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get admin token: %w", err)
+	}
+
+	oldID, err := s.findGroupByName(ctx, token.AccessToken, oldName)
+	if err != nil {
+		return err
+	}
+	if oldID == "" {
+		return nil // 이전 이름의 그룹이 없음 — 마이그레이션할 대상 없음
+	}
+
+	newID, err := s.findGroupByName(ctx, token.AccessToken, newName)
+	if err != nil {
+		return err
+	}
+	if newID != "" {
+		return fmt.Errorf("legacy group '%s' and new group '%s' both exist — manual merge required", oldName, newName)
+	}
+
+	if err := config.KC.Client.UpdateGroup(ctx, token.AccessToken, config.KC.Realm, gocloak.Group{
+		ID:   &oldID,
+		Name: &newName,
+	}); err != nil {
+		return fmt.Errorf("failed to rename keycloak group '%s' to '%s': %w", oldName, newName, err)
+	}
+
+	log.Printf("Successfully migrated Keycloak group identifier '%s' -> '%s'", oldName, newName)
 	return nil
 }
 
