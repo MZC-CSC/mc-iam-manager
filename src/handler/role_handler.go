@@ -1148,7 +1148,7 @@ func (h *RoleHandler) GetCspRoleByName(c echo.Context) error {
 	role, err := h.roleService.GetCspRoleByName(roleName)
 	if err != nil {
 		log.Printf("csp 역할 조회 실패 - Name: %s, 에러: %v", roleName, err)
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "csp 역할 조회 싶패패"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "csp 역할 조회 실패"})
 	}
 
 	if role == nil {

@@ -793,9 +793,12 @@ func (r *RoleRepository) FindCspRoleByName(cspRoleName string) (*model.CspRole, 
 	var cspRole *model.CspRole
 	err := r.db.Where("name = ?", cspRoleName).First(&cspRole).Error
 	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
 		return nil, err
 	}
-	return cspRole, err
+	return cspRole, nil
 }
 
 // FindRoleSubByRoleIDAndType 역할 ID와 타입으로 RoleSub 조회
