@@ -92,6 +92,7 @@ func main() {
 		&mcmpapi.McmpApiService{},
 		&mcmpapi.McmpApiAction{},
 		&mcmpapi.McmpApiServiceMeta{},
+		&mcmpapi.McmpApiPermissionActionMapping{},
 		&model.MciamPermission{},
 		&model.MciamRoleMciamPermission{},
 		&model.Organization{},

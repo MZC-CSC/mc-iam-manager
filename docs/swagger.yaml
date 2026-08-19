@@ -4550,24 +4550,20 @@ paths:
     post:
       consumes:
       - application/json
-      description: Returns all platform actions mapped to a specific permission
+      description: Not implemented — no backing service/repository method to list
+        mappings without a permission ID filter. Use GetPlatformActionsByPermissionID
+        instead.
       operationId: listPlatformActions
-      parameters:
-      - description: Permission ID
-        in: path
-        name: permissionId
-        required: true
-        type: string
       produces:
       - application/json
       responses:
-        "200":
-          description: OK
+        "501":
+          description: Not Implemented
           schema:
-            items:
-              $ref: '#/definitions/mcmpapi.McmpApiAction'
-            type: array
-      summary: List platform actions by permission ID
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all platform action mappings (not implemented)
       tags:
       - mcmp-api-permission-action-mappings
   /api/mcmp-apis/permission-action-mappings/permissions/{permissionId}/actions/{actionId}:

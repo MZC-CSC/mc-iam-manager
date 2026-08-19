@@ -23,21 +23,19 @@ func NewMcmpApiPermissionActionMappingHandler(db *gorm.DB) *McmpApiPermissionAct
 	}
 }
 
-// ListPlatformActions 플랫폼 권한 ID에 해당하는 액션 목록 조회
-// @Summary List platform actions by permission ID
-// @Description Returns all platform actions mapped to a specific permission
+// ListPlatformActions 전체 플랫폼 권한-액션 매핑 목록 조회 (미구현)
+// @Summary List all platform action mappings (not implemented)
+// @Description Not implemented — no backing service/repository method to list mappings without a permission ID filter. Use GetPlatformActionsByPermissionID instead.
 // @Tags mcmp-api-permission-action-mappings
 // @Accept json
 // @Produce json
-// @Param permissionId path string true "Permission ID"
-// @Success 200 {array} mcmpapi.McmpApiAction
+// @Success 501 {object} map[string]string
 // @Router /api/mcmp-apis/permission-action-mappings/list [post]
 // @Id listPlatformActions
 func (h *McmpApiPermissionActionMappingHandler) ListPlatformActions(c echo.Context) error {
-
-	// filter 조건 넘기기
-	//actions, err := h.service.ListPlatformActions(c.Request().Context(), permissionID)
-	return c.JSON(http.StatusOK, map[string]string{"message": "list platform action permissions"})
+	// permissionID 필터 없이 전체 매핑을 나열하는 서비스/리포지토리 메서드가 없어 미구현 상태.
+	// 개별 조회는 GetPlatformActionsByPermissionID(permissionId 기준)를 사용할 것.
+	return c.JSON(http.StatusNotImplemented, map[string]string{"error": "not implemented: use GET /platforms/id/{permissionId}/actions instead"})
 }
 
 // GetPlatformActionsByPermissionID 플랫폼 권한 ID에 해당하는 액션 목록 조회
