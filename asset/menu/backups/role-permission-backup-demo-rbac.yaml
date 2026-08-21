@@ -1,0 +1,162 @@
+# scripts/demo/setup-demo-rbac.sh 전용 입력 파일.
+# permission.yaml(온보딩 기본 5역할: admin/operator/viewer/billadmin/billviewer)은 건드리지 않고,
+# 5모듈(Workflow/Application/Data/Cost/Observability) x 3단계(viewer/operator/admin) 데모용
+# 13개 역할의 메뉴 매핑만 이 파일에 선언한다. billviewer/billadmin은 이미 매핑돼 있어 포함하지 않는다.
+#
+# 반영: POST /api/setup/restore-role-permissions?mode=additive (이 파일을 요청 바디로 그대로 전달)
+# — 역할이 이미 존재해야 하며(scripts/demo/setup-demo-rbac.sh가 먼저 POST /api/roles로 생성),
+# additive라 재실행해도 안전(이미 매핑된 항목은 건너뜀).
+#
+# 설계 근거: mcmp-qa/registry/iam-assets/ROLE-TEAM-USER-DEMO-DESIGN.md "1. 역할" 표.
+kind: role-permission-backup
+backupAt: "2026-08-22T00:00:00Z"
+source: demo-rbac-setup
+sections:
+  - permissions
+permissions:
+  - role: wfviewer
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - workflows
+    operations: []
+    csps: []
+
+  - role: wfoperator
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - workflows
+    operations: []
+    csps: []
+
+  - role: wfadmin
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - workflows
+    operations: []
+    csps: []
+
+  - role: appviewer
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - swcatalogs
+    operations: []
+    csps: []
+
+  - role: appoperator
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - swcatalogs
+    operations: []
+    csps: []
+
+  - role: appadmin
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - swcatalogs
+    operations: []
+    csps: []
+
+  - role: dataviewer
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - datamigrations
+    operations: []
+    csps: []
+
+  - role: dataoperator
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - datamigrations
+    operations: []
+    csps: []
+
+  - role: dataadmin
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - datamigrations
+    operations: []
+    csps: []
+
+  - role: billoperator
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - analytics
+      - costanalysis
+    operations: []
+    csps: []
+
+  - role: monviewer
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - analytics
+      - observability
+    operations: []
+    csps: []
+
+  - role: monoperator
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - analytics
+      - observability
+    operations: []
+    csps: []
+
+  - role: monadmin
+    menus:
+      - operations
+      - manage
+      - workloads
+      - infraworkloads
+      - k8sworkloads
+      - analytics
+      - observability
+    operations: []
+    csps: []
