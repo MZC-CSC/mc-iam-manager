@@ -32,6 +32,11 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/m-cmp/mc-iam-manager/model"
@@ -772,4 +777,67 @@ func TestGetOrganizationUsers_WithUsers(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, users, 2)
+}
+
+// --- 조직 시드 경로 해석 (MC_IAM_MANAGER_ORG) ---
+
+// TC-ROSP-01: filePath 인자가 있으면 환경변수보다 우선한다
+func TestResolveOrganizationSeedPath_ArgWins(t *testing.T) {
+	t.Setenv("MC_IAM_MANAGER_ORG", "/from/env/organizations.yaml")
+
+	got := resolveOrganizationSeedPath("/explicit/path.yaml")
+
+	assert.Equal(t, "/explicit/path.yaml", got)
+}
+
+// TC-ROSP-02: filePath가 비면 MC_IAM_MANAGER_ORG의 로컬 경로를 쓴다
+func TestResolveOrganizationSeedPath_EnvLocalPath(t *testing.T) {
+	seed := filepath.Join(t.TempDir(), "organizations.yaml")
+	require.NoError(t, os.WriteFile(seed, []byte("organizations: []\n"), 0o600))
+	t.Setenv("MC_IAM_MANAGER_ORG", seed)
+
+	got := resolveOrganizationSeedPath("")
+
+	assert.Equal(t, seed, got)
+}
+
+// TC-ROSP-03: 둘 다 없으면 번들된 asset 기본 경로로 폴백한다
+func TestResolveOrganizationSeedPath_FallbackToAsset(t *testing.T) {
+	t.Setenv("MC_IAM_MANAGER_ORG", "")
+
+	got := resolveOrganizationSeedPath("")
+
+	assert.True(t, strings.HasSuffix(filepath.ToSlash(got), "organization/organizations.yaml"),
+		"기본 경로여야 한다: %s", got)
+}
+
+// TC-ROSP-04: URL이 응답하지 않으면 기본 경로로 폴백한다 (다운로드 실패가 시드를 막지 않는다)
+func TestResolveOrganizationSeedPath_URLFailureFallsBack(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	t.Setenv("MC_IAM_MANAGER_ORG", srv.URL+"/organizations.yaml")
+
+	got := resolveOrganizationSeedPath("")
+
+	assert.True(t, strings.HasSuffix(filepath.ToSlash(got), "organization/organizations.yaml"),
+		"다운로드 실패 시 기본 경로여야 한다: %s", got)
+}
+
+// TC-ROSP-05: URL이 정상이면 내려받은 임시 파일 경로를 쓴다
+func TestResolveOrganizationSeedPath_URLDownloaded(t *testing.T) {
+	body := "organizations:\n  - organization_code: \"01\"\n    name: \"Root\"\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	t.Setenv("MC_IAM_MANAGER_ORG", srv.URL+"/organizations.yaml")
+
+	got := resolveOrganizationSeedPath("")
+	defer os.Remove(got)
+
+	data, err := os.ReadFile(got)
+	require.NoError(t, err)
+	assert.Equal(t, body, string(data))
 }

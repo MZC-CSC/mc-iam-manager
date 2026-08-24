@@ -107,6 +107,32 @@ login() {
 }
 
 # ---- 조직 조회 ----
+# 조직 트리의 루트를 자동 탐지한다. 루트 이름은 설치 환경마다 다르므로(organizations.yaml 이 소유)
+# 하드코딩하지 않는다. parent_id 는 *uint + omitempty 라 최상위 조직은 필드 자체가 없다.
+#   최상위 1개  -> 그 조직 하위에 팀을 둔다
+#   최상위 0개  -> 팀을 최상위에 둔다
+#   최상위 2개+ -> 임의로 고르지 않고 경고 후 최상위에 둔다
+detect_root_org_id() {
+  local roots count
+  roots=$(echo "$ORGS_JSON" | jq -c 'map(select((.parent_id // null) == null))')
+  count=$(echo "$roots" | jq 'length')
+  case "$count" in
+    1)
+      DETECTED_ROOT_ID=$(echo "$roots" | jq -r '.[0].id')
+      echo "  루트 조직 '$(echo "$roots" | jq -r '.[0].name')' (id=$DETECTED_ROOT_ID) 하위를 사용합니다"
+      ;;
+    0)
+      DETECTED_ROOT_ID=""
+      echo "  최상위 조직 없음 — 팀을 최상위에 둡니다"
+      ;;
+    *)
+      DETECTED_ROOT_ID=""
+      echo "  경고: 최상위 조직이 ${count}개라 루트를 특정할 수 없습니다 — 팀을 최상위에 둡니다"
+      echo "        ($(echo "$roots" | jq -r 'map(.name)|join(", ")'))"
+      ;;
+  esac
+}
+
 ORGS_JSON=""
 fetch_orgs() { api_call GET "/api/groups"; ORGS_JSON="$API_BODY"; }
 
@@ -142,18 +168,15 @@ for m in "${MODULE_ORDER[@]}"; do
 done
 
 fetch_orgs
-# 팀 조직은 MZC 하위에 만들어진다(setup-demo-rbac.sh). 트리 어딘가의 동명 조직을 잘못 지우지 않도록
-# 반드시 MZC 하위로 스코프해서 찾는다.
-MZC_ROOT_ID="$(find_org_id "MZC" "")"
-if [ -z "$MZC_ROOT_ID" ]; then
-  echo "  최상위 조직 'MZC' 없음 — 삭제할 팀 조직 없음"
-else
-  for m in "${MODULE_ORDER[@]}"; do
-    team="${MODULE_TEAM[$m]}"
-    org_id="$(find_org_id "$team" "$MZC_ROOT_ID")"
-    [ -n "$org_id" ] && ORG_TARGETS+=("$org_id|$team")
-  done
-fi
+# 팀 조직은 setup-demo-rbac.sh 가 루트 조직 하위에 만든다(루트가 없으면 최상위).
+# 트리 어딘가의 동명 조직을 잘못 지우지 않도록 반드시 같은 부모로 스코프해서 찾는다.
+detect_root_org_id
+ROOT_ORG_ID="$DETECTED_ROOT_ID"
+for m in "${MODULE_ORDER[@]}"; do
+  team="${MODULE_TEAM[$m]}"
+  org_id="$(find_org_id "$team" "$ROOT_ORG_ID")"
+  [ -n "$org_id" ] && ORG_TARGETS+=("$org_id|$team")
+done
 
 for role in "${NEW_ROLES[@]}"; do
   api_call GET "/api/roles/name/$role?roleType=platform"

@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/m-cmp/mc-iam-manager/model"
 	"github.com/m-cmp/mc-iam-manager/repository"
@@ -597,15 +600,66 @@ func (s *OrganizationService) GetOrganizationUsers(orgID uint) ([]model.User, er
 
 // --- 조직 시드 ---
 
+// resolveOrganizationSeedPath 조직 시드 YAML의 실제 경로를 결정한다.
+// 우선순위: filePath 인자 > MC_IAM_MANAGER_ORG 환경변수 > 번들된 asset 기본 경로.
+// MC_IAM_MANAGER_ORG가 http(s) URL이면 임시 파일로 내려받아 그 경로를 쓰고, 실패하면 기본 경로로 폴백한다.
+// (menu_service.go의 MC_WEB_CONSOLE_MENUYAML 처리와 같은 방식)
+func resolveOrganizationSeedPath(filePath string) string {
+	defaultPath := filepath.Join(util.GetAssetPath(), "organization", "organizations.yaml")
+
+	if filePath != "" {
+		return filePath
+	}
+
+	util.LoadEnvFiles()
+	configured := strings.TrimSpace(os.Getenv("MC_IAM_MANAGER_ORG"))
+	if configured == "" {
+		return defaultPath
+	}
+
+	if strings.HasPrefix(configured, "http://") || strings.HasPrefix(configured, "https://") {
+		downloaded, err := downloadOrganizationSeed(configured)
+		if err != nil {
+			log.Printf("[WARN] Failed to download organization seed from %s: %v. Falling back to %s", configured, err, defaultPath)
+			return defaultPath
+		}
+		log.Printf("[INFO] Using organization seed downloaded from %s", configured)
+		return downloaded
+	}
+
+	log.Printf("[INFO] Using organization seed from MC_IAM_MANAGER_ORG: %s", configured)
+	return configured
+}
+
+// downloadOrganizationSeed URL의 조직 시드 YAML을 임시 파일로 내려받고 그 경로를 반환한다.
+func downloadOrganizationSeed(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	tmp, err := os.CreateTemp("", "organizations-*.yaml")
+	if err != nil {
+		return "", err
+	}
+	defer tmp.Close()
+
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		return "", err
+	}
+	return tmp.Name(), nil
+}
+
 // LoadAndRegisterOrganizationsFromYAML YAML 파일에서 기본 조직 구조를 로드하여 DB에 Upsert
-// filePath가 빈 문자열이면 기본 경로(asset/organization/organizations.yaml) 사용
+// 경로는 filePath 인자 > MC_IAM_MANAGER_ORG 환경변수 > asset/organization/organizations.yaml 순으로 결정한다.
 // 파일이 없으면 WARN 로그 후 skip (soft failure)
 func (s *OrganizationService) LoadAndRegisterOrganizationsFromYAML(filePath string) error {
-	effectivePath := filePath
-	if effectivePath == "" {
-		assetPath := util.GetAssetPath()
-		effectivePath = filepath.Join(assetPath, "organization", "organizations.yaml")
-	}
+	effectivePath := resolveOrganizationSeedPath(filePath)
 
 	data, err := os.ReadFile(effectivePath)
 	if err != nil {
