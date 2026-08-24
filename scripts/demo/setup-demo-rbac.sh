@@ -141,6 +141,32 @@ apply_permission_backup() {
 ORGS_JSON=""
 fetch_orgs() { api_call GET "/api/groups"; ORGS_JSON="$API_BODY"; }
 
+# 조직 트리의 루트를 자동 탐지한다. 루트 이름은 설치 환경마다 다르므로(organizations.yaml 이 소유)
+# 하드코딩하지 않는다. parent_id 는 *uint + omitempty 라 최상위 조직은 필드 자체가 없다.
+#   최상위 1개  -> 그 조직 하위에 팀을 둔다
+#   최상위 0개  -> 팀을 최상위에 둔다
+#   최상위 2개+ -> 임의로 고르지 않고 경고 후 최상위에 둔다
+detect_root_org_id() {
+  local roots count
+  roots=$(echo "$ORGS_JSON" | jq -c 'map(select((.parent_id // null) == null))')
+  count=$(echo "$roots" | jq 'length')
+  case "$count" in
+    1)
+      DETECTED_ROOT_ID=$(echo "$roots" | jq -r '.[0].id')
+      echo "  루트 조직 '$(echo "$roots" | jq -r '.[0].name')' (id=$DETECTED_ROOT_ID) 하위를 사용합니다"
+      ;;
+    0)
+      DETECTED_ROOT_ID=""
+      echo "  최상위 조직 없음 — 팀을 최상위에 둡니다"
+      ;;
+    *)
+      DETECTED_ROOT_ID=""
+      echo "  경고: 최상위 조직이 ${count}개라 루트를 특정할 수 없습니다 — 팀을 최상위에 둡니다"
+      echo "        ($(echo "$roots" | jq -r 'map(.name)|join(", ")'))"
+      ;;
+  esac
+}
+
 ORG_ID=""
 ensure_org() {
   local name="$1" parent_id="${2:-}"
@@ -280,10 +306,11 @@ done
 echo "== 메뉴 매핑 적용 (role-permission-backup-demo-rbac.yaml, additive) =="
 apply_permission_backup
 
-echo "== 조직 최상위(MZC) 조회 =="
-ensure_org "MZC" ""
-MZC_ROOT_ID="$ORG_ID"
-echo "MZC id=$MZC_ROOT_ID"
+echo "== 루트 조직 탐지 =="
+# 루트 조직 생성은 온보딩(1_setup_auto.sh 의 organizations.yaml 시드) 소관이라 여기서는 조회만 한다.
+fetch_orgs
+detect_root_org_id
+ROOT_ORG_ID="$DETECTED_ROOT_ID"
 
 for m in "${MODULE_ORDER[@]}"; do
   team="${MODULE_TEAM[$m]}"
@@ -291,7 +318,7 @@ for m in "${MODULE_ORDER[@]}"; do
   echo "== 모듈: $team ($m) =="
 
   echo " -- 팀(조직) --"
-  ensure_org "$team" "$MZC_ROOT_ID"
+  ensure_org "$team" "$ROOT_ORG_ID"
   parent_id="$ORG_ID"
 
   for t in "${TIER_ORDER[@]}"; do

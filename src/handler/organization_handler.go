@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/m-cmp/mc-iam-manager/model"
@@ -27,16 +28,19 @@ func NewOrganizationHandler(db *gorm.DB) *OrganizationHandler {
 
 // SetupInitialOrganizations godoc
 // @Summary 기본 조직 초기화
-// @Description YAML 시드 파일에서 기본 조직 구조(MZC + 8개 프레임워크)를 로드하여 등록합니다. 멱등성 보장.
+// @Description YAML 시드 파일에서 기본 조직 구조를 로드하여 등록합니다. 멱등성 보장.
+// @Description 경로는 filePath 쿼리 파라미터 > MC_IAM_MANAGER_ORG 환경변수 > 번들된 asset/organization/organizations.yaml 순으로 결정됩니다.
 // @Tags organizations
 // @Produce json
+// @Param filePath query string false "조직 시드 YAML 경로. 미지정 시 MC_IAM_MANAGER_ORG 또는 번들 asset 사용"
 // @Success 200 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/setup/initial-organizations [post]
 // @Id setupInitialOrganizations
 func (h *OrganizationHandler) SetupInitialOrganizations(c echo.Context) error {
-	if err := h.orgService.LoadAndRegisterOrganizationsFromYAML(""); err != nil {
+	filePath := strings.TrimSpace(c.QueryParam("filePath"))
+	if err := h.orgService.LoadAndRegisterOrganizationsFromYAML(filePath); err != nil {
 		log.Printf("[ERROR] SetupInitialOrganizations failed: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
