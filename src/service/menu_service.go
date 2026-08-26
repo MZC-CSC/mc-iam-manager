@@ -473,9 +473,12 @@ func (s *MenuService) Delete(id string) error {
 	return s.menuRepo.DeleteMenuWithChildren(id)
 }
 
-// LoadAndRegisterMenusFromYAML YAML 파일에서 메뉴를 로드하여 DB에 등록(Upsert)
+// LoadAndRegisterMenusFromYAML YAML 파일에서 메뉴를 로드하여 DB에 등록(Upsert)한 뒤
+// InitializeMenuPermissionsFromYAML("")로 역할-메뉴 권한 시딩까지 체이닝합니다.
 // filePath 쿼리 파라미터가 없으면 .env의 MC_WEB_CONSOLE_MENUYAML URL에서 다운로드 시도
-func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) error {
+// 권한 시딩 실패는 메뉴 등록 자체를 실패시키지 않으며(메뉴는 이미 upsert된 뒤이므로),
+// 대신 경고 메시지를 반환값으로 넘겨 호출자가 노출할 수 있게 합니다.
+func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) (string, error) {
 	effectiveFilePath := filePath
 	downloaded := false
 
@@ -544,12 +547,12 @@ func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) error {
 	menus, err := s.menuRepo.LoadMenusFromYAML(effectiveFilePath)
 	if err != nil {
 		// If download failed and local file also fails, return error
-		return fmt.Errorf("failed to load menus from YAML file %s (downloaded: %v): %w", effectiveFilePath, downloaded, err)
+		return "", fmt.Errorf("failed to load menus from YAML file %s (downloaded: %v): %w", effectiveFilePath, downloaded, err)
 	}
 
 	if len(menus) == 0 {
 		fmt.Printf("No menus found in YAML file %s, skipping registration.\n", effectiveFilePath)
-		return nil // 처리할 메뉴 없음
+		return "", nil // 처리할 메뉴 없음
 	}
 
 	// 2. home 메뉴가 있는지 확인하고 업데이트
@@ -558,7 +561,7 @@ func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) error {
 			// home 메뉴가 있으면 업데이트
 			homeMenu := menu
 			if err := applyMenuResourceDefaults(&homeMenu); err != nil {
-				return fmt.Errorf("invalid home menu resource: %w", err)
+				return "", fmt.Errorf("invalid home menu resource: %w", err)
 			}
 			if err := s.menuRepo.UpdateMenu("home", map[string]interface{}{
 				"display_name":      homeMenu.DisplayName,
@@ -597,18 +600,26 @@ func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) error {
 		}
 		menuCopy := menu
 		if err := applyMenuResourceDefaults(&menuCopy); err != nil {
-			return fmt.Errorf("invalid menu resource for %s: %w", menu.ID, err)
+			return "", fmt.Errorf("invalid menu resource for %s: %w", menu.ID, err)
 		}
 		menusToUpsert = append(menusToUpsert, menuCopy)
 	}
 
 	if len(menusToUpsert) > 0 {
 		if err := s.menuRepo.UpsertMenus(menusToUpsert); err != nil {
-			return fmt.Errorf("failed to upsert menus to database: %w", err)
+			return "", fmt.Errorf("failed to upsert menus to database: %w", err)
 		}
 	}
 
-	return nil
+	// 5. 메뉴 등록에 이어 역할-메뉴 권한까지 시딩(체이닝). 메뉴는 이미 upsert된 뒤이므로
+	// 여기서 실패해도 메뉴 등록 자체를 실패시키지 않고 경고만 반환한다.
+	if permErr := s.InitializeMenuPermissionsFromYAML(""); permErr != nil {
+		warning := fmt.Sprintf("menu registration succeeded but permission seed failed: %v", permErr)
+		fmt.Printf("Warning: %s\n", warning)
+		return warning, nil
+	}
+
+	return "", nil
 }
 
 // RegisterMenusFromContent YAML 콘텐츠([]byte)를 파싱하여 DB에 등록(Upsert)
