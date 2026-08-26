@@ -533,12 +533,12 @@ func (h *MenuHandler) DeleteMenu(c echo.Context) error {
 
 // RegisterMenusFromYAML godoc
 // @Summary Register/Update menus from YAML file or URL
-// @Description Register or update menus from a local YAML file specified by the filePath query parameter, or from the MC_WEB_CONSOLE_MENUYAML URL in .env if not provided. If loaded from URL, the file is saved to asset/menu/menu.yaml.
+// @Description Register or update menus from a local YAML file specified by the filePath query parameter, or from the MC_WEB_CONSOLE_MENUYAML URL in .env if not provided. If loaded from URL, the file is saved to asset/menu/menu.yaml. Also chains into role-menu permission seeding (asset/menu/permission.yaml); if that step fails, the response still returns 200 but includes a permissionsWarning field.
 // @Tags menus
 // @Accept json
 // @Produce json
 // @Param filePath query string false "YAML file path (optional, uses .env URL or default local path if not provided)"
-// @Success 200 {object} map[string]string "message: Successfully registered menus from YAML"
+// @Success 200 {object} map[string]string "message: Successfully registered menus from YAML; permissionsWarning: present only if the chained permission seed failed"
 // @Failure 500 {object} map[string]string "error: 실패 메시지"
 // @Security BearerAuth
 // @Router /api/setup/initial-menus [post]
@@ -546,15 +546,20 @@ func (h *MenuHandler) DeleteMenu(c echo.Context) error {
 func (h *MenuHandler) RegisterMenusFromYAML(c echo.Context) error {
 	filePath := c.QueryParam("filePath") // 쿼리 파라미터로 파일 경로 받기 (선택 사항)
 
-	if err := h.menuService.LoadAndRegisterMenusFromYAML(filePath); err != nil {
+	permissionsWarning, err := h.menuService.LoadAndRegisterMenusFromYAML(filePath)
+	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": fmt.Sprintf("메뉴 YAML 등록 실패: %v", err),
 		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{
+	response := map[string]string{
 		"message": "Successfully registered menus from YAML",
-	})
+	}
+	if permissionsWarning != "" {
+		response["permissionsWarning"] = permissionsWarning
+	}
+	return c.JSON(http.StatusOK, response)
 }
 
 // RegisterMenusFromBody godoc

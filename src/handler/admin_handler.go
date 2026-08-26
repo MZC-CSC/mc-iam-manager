@@ -170,23 +170,13 @@ func (h *AdminHandler) SetupInitialAdmin(c echo.Context) error {
 		// })
 	}
 
-	// 메뉴 등록
-	err = h.menuService.LoadAndRegisterMenusFromYAML("")
+	// 메뉴 등록 (역할-메뉴 권한 시딩까지 체이닝됨)
+	_, err = h.menuService.LoadAndRegisterMenusFromYAML("")
 	if err != nil {
 		log.Printf("[ERROR] Register Menu failed: %v", err)
 		// return c.JSON(http.StatusInternalServerError, model.Response{
 		// 	Error:   true,
 		// 	Message: "Failed to register menus",
-		// })
-	}
-
-	// 메뉴와 기본 역할 매핑 (permission.yaml)
-	err = h.menuService.InitializeMenuPermissionsFromYAML("")
-	if err != nil {
-		log.Printf("[ERROR] Initialize Menu Permissions (YAML) failed: %v", err)
-		// return c.JSON(http.StatusInternalServerError, model.Response{
-		// 	Error:   true,
-		// 	Message: "Failed to initialize menu permissions",
 		// })
 	}
 
