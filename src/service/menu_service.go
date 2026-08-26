@@ -412,6 +412,7 @@ func (s *MenuService) CreateWithRoleMappings(req *model.CreateMenuRequest) (*mod
 		ViewType:         req.ViewType,
 		FrameworkService: req.FrameworkService,
 		Path:             req.Path,
+		Icon:             req.Icon,
 	}
 	if err := applyMenuResourceDefaults(menu); err != nil {
 		return nil, err
@@ -572,6 +573,7 @@ func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) (string, err
 				"view_type":         homeMenu.ViewType,
 				"framework_service": homeMenu.FrameworkService,
 				"path":              homeMenu.Path,
+				"icon":              homeMenu.Icon,
 			}); err != nil {
 				fmt.Printf("Warning: Failed to update home menu: %v\n", err)
 			}

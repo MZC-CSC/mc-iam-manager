@@ -110,6 +110,7 @@ func (r *MenuRepository) CreateMenu(req *model.CreateMenuRequest) error {
 		ViewType:         req.ViewType,
 		FrameworkService: req.FrameworkService,
 		Path:             req.Path,
+		Icon:             req.Icon,
 	}
 	return r.db.Create(menu).Error
 }
@@ -231,7 +232,7 @@ func (r *MenuRepository) UpsertMenus(menus []model.Menu) error {
 		Columns:   []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"parent_id", "display_name", "res_type", "is_action", "priority", "menu_number",
-			"view_type", "framework_service", "path",
+			"view_type", "framework_service", "path", "icon",
 		}),
 	}).Create(&menus).Error; err != nil {
 		tx.Rollback() // 롤백
