@@ -467,6 +467,9 @@ func (h *MenuHandler) UpdateMenu(c echo.Context) error {
 	if menu.Path != "" {
 		updates["path"] = menu.Path
 	}
+	if menu.Icon != "" {
+		updates["icon"] = menu.Icon
+	}
 
 	if len(updates) == 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{
