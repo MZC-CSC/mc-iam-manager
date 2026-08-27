@@ -125,6 +125,9 @@ func (m *mockKeycloakService) AddRealmRoleToGroup(ctx context.Context, groupName
 func (m *mockKeycloakService) RemoveRealmRoleFromGroup(ctx context.Context, groupName, roleName string) error {
 	return nil
 }
+func (m *mockKeycloakService) DeleteRealmRole(ctx context.Context, roleName string) error {
+	return nil
+}
 func (m *mockKeycloakService) DeleteGroup(ctx context.Context, groupName string) error {
 	return nil
 }
