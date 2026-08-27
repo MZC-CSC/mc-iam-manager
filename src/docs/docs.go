@@ -9380,56 +9380,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/setup/initial-role-menu-permission": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Deprecated. permission.csv로 메뉴 권한을 초기화합니다. 제거 예정이니 InitializeMenuPermissionsFromYAML을 사용하세요.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Initialize menu permissions from CSV (deprecated)",
-                "operationId": "initializeMenuPermissions",
-                "deprecated": true,
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "CSV file path (optional, default asset/menu/permission.csv)",
-                        "name": "filePath",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/model.Response"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/model.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/model.Response"
-                        }
-                    }
-                }
-            }
-        },
         "/api/setup/initial-role-menu-permission-yaml": {
             "get": {
                 "security": [

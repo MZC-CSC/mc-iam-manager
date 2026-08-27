@@ -8072,39 +8072,6 @@ paths:
       summary: 기본 조직 초기화
       tags:
       - organizations
-  /api/setup/initial-role-menu-permission:
-    get:
-      consumes:
-      - application/json
-      deprecated: true
-      description: Deprecated. permission.csv로 메뉴 권한을 초기화합니다. 제거 예정이니 InitializeMenuPermissionsFromYAML을
-        사용하세요.
-      operationId: initializeMenuPermissions
-      parameters:
-      - description: CSV file path (optional, default asset/menu/permission.csv)
-        in: query
-        name: filePath
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/model.Response'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/model.Response'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/model.Response'
-      security:
-      - BearerAuth: []
-      summary: Initialize menu permissions from CSV (deprecated)
-      tags:
-      - admin
   /api/setup/initial-role-menu-permission-yaml:
     get:
       consumes:
