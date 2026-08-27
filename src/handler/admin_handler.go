@@ -171,7 +171,7 @@ func (h *AdminHandler) SetupInitialAdmin(c echo.Context) error {
 	}
 
 	// 메뉴 등록 (역할-메뉴 권한 시딩까지 체이닝됨)
-	_, err = h.menuService.LoadAndRegisterMenusFromYAML("")
+	_, _, err = h.menuService.LoadAndRegisterMenusFromYAML("")
 	if err != nil {
 		log.Printf("[ERROR] Register Menu failed: %v", err)
 		// return c.JSON(http.StatusInternalServerError, model.Response{

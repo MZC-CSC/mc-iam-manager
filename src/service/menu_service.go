@@ -479,7 +479,9 @@ func (s *MenuService) Delete(id string) error {
 // filePath 쿼리 파라미터가 없으면 .env의 MC_WEB_CONSOLE_MENUYAML URL에서 다운로드 시도
 // 권한 시딩 실패는 메뉴 등록 자체를 실패시키지 않으며(메뉴는 이미 upsert된 뒤이므로),
 // 대신 경고 메시지를 반환값으로 넘겨 호출자가 노출할 수 있게 합니다.
-func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) (string, error) {
+// 세 번째 반환값은 DB에는 있지만 이번 yaml에는 없는 메뉴 id 목록(orphan 후보)이며,
+// 감지만 하고 삭제는 하지 않습니다 — 삭제는 여전히 DeleteMenu(수동)로만 수행합니다.
+func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) (string, []string, error) {
 	effectiveFilePath := filePath
 	downloaded := false
 
@@ -548,12 +550,12 @@ func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) (string, err
 	menus, err := s.menuRepo.LoadMenusFromYAML(effectiveFilePath)
 	if err != nil {
 		// If download failed and local file also fails, return error
-		return "", fmt.Errorf("failed to load menus from YAML file %s (downloaded: %v): %w", effectiveFilePath, downloaded, err)
+		return "", nil, fmt.Errorf("failed to load menus from YAML file %s (downloaded: %v): %w", effectiveFilePath, downloaded, err)
 	}
 
 	if len(menus) == 0 {
 		fmt.Printf("No menus found in YAML file %s, skipping registration.\n", effectiveFilePath)
-		return "", nil // 처리할 메뉴 없음
+		return "", nil, nil // 처리할 메뉴 없음
 	}
 
 	// 2. home 메뉴가 있는지 확인하고 업데이트
@@ -562,7 +564,7 @@ func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) (string, err
 			// home 메뉴가 있으면 업데이트
 			homeMenu := menu
 			if err := applyMenuResourceDefaults(&homeMenu); err != nil {
-				return "", fmt.Errorf("invalid home menu resource: %w", err)
+				return "", nil, fmt.Errorf("invalid home menu resource: %w", err)
 			}
 			if err := s.menuRepo.UpdateMenu("home", map[string]interface{}{
 				"display_name":      homeMenu.DisplayName,
@@ -602,26 +604,56 @@ func (s *MenuService) LoadAndRegisterMenusFromYAML(filePath string) (string, err
 		}
 		menuCopy := menu
 		if err := applyMenuResourceDefaults(&menuCopy); err != nil {
-			return "", fmt.Errorf("invalid menu resource for %s: %w", menu.ID, err)
+			return "", nil, fmt.Errorf("invalid menu resource for %s: %w", menu.ID, err)
 		}
 		menusToUpsert = append(menusToUpsert, menuCopy)
 	}
 
 	if len(menusToUpsert) > 0 {
 		if err := s.menuRepo.UpsertMenus(menusToUpsert); err != nil {
-			return "", fmt.Errorf("failed to upsert menus to database: %w", err)
+			return "", nil, fmt.Errorf("failed to upsert menus to database: %w", err)
 		}
 	}
 
-	// 5. 메뉴 등록에 이어 역할-메뉴 권한까지 시딩(체이닝). 메뉴는 이미 upsert된 뒤이므로
+	// 5. DB에는 있지만 이번 yaml에는 없는 메뉴 id를 감지만 한다(삭제 없음).
+	// 자동/소프트 삭제는 채택하지 않기로 확정됐고(IAM-TECH-037), 대신 재시딩
+	// 응답에 노출해 관리자가 필요 시 DeleteMenu로 수동 정리하도록 한다.
+	orphanMenuIDs, orphanErr := s.detectOrphanMenuIDs(menus)
+	if orphanErr != nil {
+		fmt.Printf("Warning: failed to detect orphan menus: %v\n", orphanErr)
+	}
+
+	// 6. 메뉴 등록에 이어 역할-메뉴 권한까지 시딩(체이닝). 메뉴는 이미 upsert된 뒤이므로
 	// 여기서 실패해도 메뉴 등록 자체를 실패시키지 않고 경고만 반환한다.
 	if permErr := s.InitializeMenuPermissionsFromYAML(""); permErr != nil {
 		warning := fmt.Sprintf("menu registration succeeded but permission seed failed: %v", permErr)
 		fmt.Printf("Warning: %s\n", warning)
-		return warning, nil
+		return warning, orphanMenuIDs, nil
 	}
 
-	return "", nil
+	return "", orphanMenuIDs, nil
+}
+
+// detectOrphanMenuIDs DB에 존재하지만 이번에 로드한 yaml 메뉴 목록에는 없는
+// 메뉴 id를 계산한다. 삭제는 하지 않고 목록만 반환한다.
+func (s *MenuService) detectOrphanMenuIDs(yamlMenus []model.Menu) ([]string, error) {
+	yamlIDs := make(map[string]struct{}, len(yamlMenus))
+	for _, menu := range yamlMenus {
+		yamlIDs[menu.ID] = struct{}{}
+	}
+
+	dbIDs, err := s.menuRepo.GetAllMenuIDs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list existing menu ids: %w", err)
+	}
+
+	var orphanIDs []string
+	for _, id := range dbIDs {
+		if _, ok := yamlIDs[id]; !ok {
+			orphanIDs = append(orphanIDs, id)
+		}
+	}
+	return orphanIDs, nil
 }
 
 // RegisterMenusFromContent YAML 콘텐츠([]byte)를 파싱하여 DB에 등록(Upsert)
