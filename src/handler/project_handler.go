@@ -408,11 +408,6 @@ func (h *ProjectHandler) AddWorkspaceToProject(c echo.Context) error {
 		if err := h.workspaceService.AddProjectToWorkspace(workspaceIDInt, projectIDInt); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("워크스페이스 연결 실패: %v", err)})
 		}
-		// if err := h.projectService.AddWorkspaceAssociation(projectIDInt, workspaceIDInt); err != nil { // 프로젝트 ID는 배열이므로 반복문으로 처리
-		// if err.Error() == "project not found" || err.Error() == "workspace not found" {
-		// 	return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
-		// }
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("워크스페이스 연결 실패: %v", err)})
 	}
 	return c.NoContent(http.StatusNoContent)
 }
