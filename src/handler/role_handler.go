@@ -417,6 +417,18 @@ func (h *RoleHandler) DeleteRole(c echo.Context) error {
 	// Check if users are assigned to this role -> if yes, cannot delete
 	// TODO : Implement this.
 
+	// role.RoleSubs above may be preloaded scoped to reqRoleType only (see
+	// FindRoleByRoleID), which would hide a platform-type sub on this same
+	// role_id when a different roleType was requested. DeleteRoleSubs below
+	// removes ALL sub types regardless of reqRoleType, so the Keycloak realm
+	// role check below must look this up independently of that scoping.
+	isPlatformRole := false
+	if platformSub, err := h.roleService.GetRoleByID(roleIdInt, constants.RoleTypePlatform); err != nil {
+		log.Printf("Failed to check platform role sub - ID: %d, error: %v", roleIdInt, err)
+	} else {
+		isPlatformRole = platformSub != nil
+	}
+
 	roleSubs := role.RoleSubs
 	for _, roleSub := range roleSubs {
 		// Delete role-platform mapping
@@ -445,6 +457,17 @@ func (h *RoleHandler) DeleteRole(c echo.Context) error {
 	if err := h.roleService.DeleteRoleMaster(roleIdInt); err != nil {
 		log.Printf("Failed to delete role - ID: %d, error: %v", roleIdInt, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to delete role: %v", err)})
+	}
+
+	// Keycloak realm role cleanup (best-effort). Platform role assignment (user or
+	// group) is the only path that creates a realm role for this role name
+	// (AssignRole/AssignGroupPlatformRole), so only attempt this for platform roles.
+	// role.Name has a DB-level unique constraint, so no other role_master can still
+	// reference this realm role name.
+	if isPlatformRole {
+		if err := h.keycloakService.DeleteRealmRole(c.Request().Context(), role.Name); err != nil {
+			log.Printf("Failed to delete keycloak realm role for role - ID: %d, name: %s, error: %v", roleIdInt, role.Name, err)
+		}
 	}
 
 	log.Printf("Successfully deleted role - ID: %d", roleIdInt)

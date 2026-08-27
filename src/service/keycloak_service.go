@@ -92,6 +92,8 @@ type KeycloakService interface {
 	AddRealmRoleToGroup(ctx context.Context, groupName, roleName string) error
 	// RemoveRealmRoleFromGroup removes a realm role from a Keycloak group
 	RemoveRealmRoleFromGroup(ctx context.Context, groupName, roleName string) error
+	// DeleteRealmRole deletes a realm role by name (no-op if it doesn't exist)
+	DeleteRealmRole(ctx context.Context, roleName string) error
 	// DeleteGroup deletes a Keycloak group by name (no-op if the group doesn't exist)
 	DeleteGroup(ctx context.Context, groupName string) error
 	// MigrateGroupIdentifier renames a Keycloak group from a legacy name-based
@@ -1689,6 +1691,36 @@ func (s *keycloakService) CheckRealmRoleExists(ctx context.Context, roleName str
 		return false, nil
 	}
 	return true, nil
+}
+
+// DeleteRealmRole deletes a realm role by name. No-op if the role doesn't exist,
+// since realm roles are only created lazily on first platform role assignment
+// (see CreateRealmRoleAndWait) and a role may never have been assigned.
+func (s *keycloakService) DeleteRealmRole(ctx context.Context, roleName string) error {
+	if config.KC == nil || config.KC.Client == nil {
+		return fmt.Errorf("keycloak configuration not initialized")
+	}
+
+	token, err := config.KC.GetAdminToken(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get admin token: %w", err)
+	}
+
+	exists, err := s.CheckRealmRoleExists(ctx, roleName)
+	if err != nil {
+		return fmt.Errorf("failed to check realm role %s existence: %w", roleName, err)
+	}
+	if !exists {
+		log.Printf("Realm role %s not found, skipping deletion", roleName)
+		return nil
+	}
+
+	if err := config.KC.Client.DeleteRealmRole(ctx, token.AccessToken, config.KC.Realm, roleName); err != nil {
+		return fmt.Errorf("failed to delete realm role %s: %w", roleName, err)
+	}
+
+	log.Printf("Successfully deleted realm role %s", roleName)
+	return nil
 }
 
 // CreateRealmRole creates a realm role
