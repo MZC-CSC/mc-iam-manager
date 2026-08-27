@@ -79,6 +79,7 @@ func main() {
 		&model.Workspace{},
 		&model.Project{},
 		&model.Menu{},
+		&model.RoleMenuMapping{},
 		&model.ResourceType{},
 		&model.UserPlatformRole{},
 		&model.UserWorkspaceRole{},

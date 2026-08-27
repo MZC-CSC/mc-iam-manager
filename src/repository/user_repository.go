@@ -30,10 +30,6 @@ func (r *UserRepository) DB() *gorm.DB {
 
 // NewUserRepository creates a new UserRepository.
 func NewUserRepository(db *gorm.DB) *UserRepository {
-	// Auto Migrate the schema
-	if err := db.AutoMigrate(&model.User{}); err != nil {
-		log.Printf("Failed to migrate user table: %v", err)
-	}
 	return &UserRepository{db: db}
 }
 
