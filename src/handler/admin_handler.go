@@ -238,45 +238,6 @@ func (h *AdminHandler) CheckUserRoles(c echo.Context) error {
 	})
 }
 
-// InitializeMenuPermissions godoc
-// @Summary Initialize menu permissions from CSV (deprecated)
-// @Description Deprecated. permission.csv로 메뉴 권한을 초기화합니다. 제거 예정이니 InitializeMenuPermissionsFromYAML을 사용하세요.
-// @Tags admin
-// @Accept json
-// @Produce json
-// @Param filePath query string false "CSV file path (optional, default asset/menu/permission.csv)"
-// @Success 200 {object} model.Response
-// @Failure 400 {object} model.Response
-// @Failure 500 {object} model.Response
-// @Security BearerAuth
-// @Deprecated
-// @Router /api/setup/initial-role-menu-permission [get]
-// @Id initializeMenuPermissions
-func (h *AdminHandler) InitializeMenuPermissions(c echo.Context) error {
-	filePath := c.QueryParam("filePath")
-
-	log.Printf(
-		"[WARN] Deprecated API /api/setup/initial-role-menu-permission (CSV). "+
-			"Use /api/setup/initial-role-menu-permission-yaml instead. filePath=%s",
-		filePath,
-	)
-
-	err := h.menuService.InitializeMenuPermissionsFromCSV(filePath)
-	if err != nil {
-		log.Printf("[ERROR] Initialize Menu Permissions (CSV) failed: %v", err)
-		return c.JSON(http.StatusInternalServerError, model.Response{
-			Error:   true,
-			Message: fmt.Sprintf("Failed to initialize menu permissions from CSV: %v", err),
-		})
-	}
-
-	log.Printf("[INFO] Menu permissions initialized successfully from CSV (deprecated)")
-	return c.JSON(http.StatusOK, model.Response{
-		Error:   false,
-		Message: "Menu permissions initialized successfully from CSV (deprecated; prefer YAML API)",
-	})
-}
-
 // InitializeMenuPermissionsFromYAML godoc
 // @Summary Initialize role-menu permissions from YAML
 // @Description asset/menu/permission.yaml(permissions→role→menus|operations|csps)을 읽어 역할-메뉴 매핑을 DB에 시드합니다

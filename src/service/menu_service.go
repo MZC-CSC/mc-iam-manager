@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"encoding/csv"
-
 	"github.com/m-cmp/mc-iam-manager/constants"
 	"github.com/m-cmp/mc-iam-manager/model"
 	"github.com/m-cmp/mc-iam-manager/repository"
@@ -720,23 +718,6 @@ type rolePermissionFile struct {
 	Permissions []rolePermissionEntry `yaml:"permissions"`
 }
 
-// InitializeMenuPermissionsFromCSV CSV 매트릭스로 역할-메뉴 권한을 시드합니다.
-//
-// Deprecated: permission.csv 시드는 제거 예정입니다.
-// 신규/운영 시드는 InitializeMenuPermissionsFromYAML(asset/menu/permission.yaml)을 사용하세요.
-func (s *MenuService) InitializeMenuPermissionsFromCSV(filePath string) error {
-	effectiveFilePath, cleanup, err := s.resolvePermissionSeedPath(
-		filePath, "permission.csv", ".csv",
-	)
-	if err != nil {
-		return err
-	}
-	if cleanup != "" {
-		defer os.Remove(cleanup)
-	}
-	return s.initializeMenuPermissionsFromCSVFile(effectiveFilePath)
-}
-
 // InitializeMenuPermissionsFromYAML 역할 중심 permission.yaml으로 권한을 시드합니다.
 // filePath가 비어 있으면 확장자가 맞는 MC_WEB_CONSOLE_MENU_PERMISSIONS,
 // 또는 asset/menu/permission.yaml을 사용합니다.
@@ -894,58 +875,6 @@ func (s *MenuService) loadAndApplyMenuPermissionsFromYAML(filePath string) error
 			}
 		}
 		roleMenus[roleName] = menus
-	}
-
-	return s.applyRoleMenuPermissionSeed(roleMenus)
-}
-
-// initializeMenuPermissionsFromCSVFile 기존 CSV 매트릭스를 적용합니다.
-// Deprecated path helper — CSV API 제거 시 함께 삭제 예정.
-func (s *MenuService) initializeMenuPermissionsFromCSVFile(filePath string) error {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to open CSV file: %w", err)
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	headers, err := reader.Read()
-	if err != nil {
-		return fmt.Errorf("failed to read CSV headers: %w", err)
-	}
-	if len(headers) < 3 {
-		return fmt.Errorf("invalid CSV headers in %s", filePath)
-	}
-
-	roleNames := headers[2:]
-	roleMenus := make(map[string][]string, len(roleNames))
-	for _, roleName := range roleNames {
-		roleMenus[roleName] = []string{}
-	}
-
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read CSV record: %w", err)
-		}
-		if len(record) < 3 {
-			continue
-		}
-		menuID := strings.TrimSpace(record[1])
-		if menuID == "" {
-			continue
-		}
-		for i, roleName := range roleNames {
-			if i+2 >= len(record) {
-				continue
-			}
-			if strings.EqualFold(strings.TrimSpace(record[i+2]), "TRUE") {
-				roleMenus[roleName] = append(roleMenus[roleName], menuID)
-			}
-		}
 	}
 
 	return s.applyRoleMenuPermissionSeed(roleMenus)
