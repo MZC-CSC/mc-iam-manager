@@ -82,7 +82,7 @@ func TestLoadAndRegisterMenusFromYAML_ChainsPermissionSeed_Success(t *testing.T)
 	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML)
 
 	s := NewMenuService(db)
-	warning, err := s.LoadAndRegisterMenusFromYAML(menuPath)
+	warning, _, err := s.LoadAndRegisterMenusFromYAML(menuPath)
 	require.NoError(t, err)
 	require.Empty(t, warning, "permission seed succeeded, so no warning should be returned")
 
@@ -101,11 +101,51 @@ func TestLoadAndRegisterMenusFromYAML_PermissionSeedMissing_ReturnsWarningNotErr
 	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML)
 
 	s := NewMenuService(db)
-	warning, err := s.LoadAndRegisterMenusFromYAML(menuPath)
+	warning, _, err := s.LoadAndRegisterMenusFromYAML(menuPath)
 	require.NoError(t, err, "permission seed failure must not fail menu registration")
 	require.NotEmpty(t, warning, "permission seed failure should surface as a warning")
 
 	var mappingCount int64
 	require.NoError(t, db.Model(&model.RoleMenuMapping{}).Count(&mappingCount).Error)
 	require.Zero(t, mappingCount, "no mapping should be created when permission seed fails")
+}
+
+// TC-IAM-TECH-037-D-01: DB에는 있지만 이번 yaml에는 없는 메뉴 id는
+// orphanMenusDetected로 감지되어야 하며, 실제로 삭제되지는 않아야 한다.
+func TestLoadAndRegisterMenusFromYAML_DetectsOrphanMenus_WithoutDeleting(t *testing.T) {
+	db := setupMenuServiceTestDB(t)
+
+	// yaml 재동기화 이전부터 DB에 존재하던, 이번 yaml에는 빠진 메뉴
+	require.NoError(t, db.Create(&model.Menu{ID: "removed-from-yaml", DisplayName: "Removed", ResType: "menu"}).Error)
+
+	missingPermPath := filepath.Join(t.TempDir(), "does-not-exist-permission.yaml")
+	t.Setenv("MC_WEB_CONSOLE_MENU_PERMISSIONS", missingPermPath)
+
+	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML) // home만 포함, removed-from-yaml 없음
+
+	s := NewMenuService(db)
+	_, orphanMenus, err := s.LoadAndRegisterMenusFromYAML(menuPath)
+	require.NoError(t, err)
+	require.Contains(t, orphanMenus, "removed-from-yaml", "yaml에서 빠진 기존 메뉴 id가 감지되어야 한다")
+
+	// 감지만 하고 삭제는 하지 않아야 한다 — 재조회로 DB에 그대로 남아있는지 확인
+	var stillExists model.Menu
+	require.NoError(t, db.Where("id = ?", "removed-from-yaml").First(&stillExists).Error,
+		"orphan으로 감지된 메뉴가 자동으로 삭제되면 안 된다")
+}
+
+// TC-IAM-TECH-037-D-02: yaml에 포함된 메뉴는 DB에도 있는 상태라면 orphan으로 감지되지 않아야 한다.
+func TestLoadAndRegisterMenusFromYAML_NoOrphans_WhenYamlCoversAllExistingMenus(t *testing.T) {
+	db := setupMenuServiceTestDB(t)
+	require.NoError(t, db.Create(&model.Menu{ID: "home", DisplayName: "Home", ResType: "menu"}).Error)
+
+	missingPermPath := filepath.Join(t.TempDir(), "does-not-exist-permission.yaml")
+	t.Setenv("MC_WEB_CONSOLE_MENU_PERMISSIONS", missingPermPath)
+
+	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML)
+
+	s := NewMenuService(db)
+	_, orphanMenus, err := s.LoadAndRegisterMenusFromYAML(menuPath)
+	require.NoError(t, err)
+	require.Empty(t, orphanMenus, "yaml이 기존 DB 메뉴를 모두 포함하면 orphan이 없어야 한다")
 }
