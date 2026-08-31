@@ -259,4 +259,8 @@ done
 
 echo ""
 echo "완료 — 데모 RBAC 셋업을 되돌렸다(사용자 ${#USER_TARGETS[@]} / 팀 부모 ${#ORG_TARGETS[@]} / 역할 ${#ROLE_TARGETS[@]})."
-echo "참고: 역할 삭제는 Keycloak realm role 자체를 지우지 않는다(삭제 API 없음). 재실행 시 기존 realm role이 재사용된다."
+# 2026-08-27 PR #185부터 위 DELETE /api/roles/id/:roleId가 platform role의 Keycloak realm role도
+# best-effort로 함께 지운다(role_handler.go의 DeleteRole, 실패해도 로그만 남기고 계속 진행) — 이제
+# 이 스크립트가 만든 realm role은 정상적으로 함께 정리된다. (참고: DeletePlatformRole/DeleteCspRoleMaster라는
+# 다른 두 삭제 라우트는 아직 이 정리가 없지만, 이 스크립트는 그 라우트를 쓰지 않아 영향 없음 — IAM-BUG-036에서
+# 별도로 다루는 predefined 플래그 이슈와는 무관한 별개 사안이다.)
