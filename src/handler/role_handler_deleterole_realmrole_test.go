@@ -32,9 +32,35 @@ func (m *recordingKeycloakService) DeleteRealmRole(ctx context.Context, roleName
 
 func setupDeleteRoleTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	// Named per-test in-memory DB (not the bare `file::memory:?cache=shared` used
+	// elsewhere) so this test's schema doesn't collide with model.User's
+	// many2many tags, which target these same join table names
+	// (mcmp_user_platform_roles/mcmp_user_workspace_roles) with a narrower,
+	// implicitly-created schema when some other test in this package migrates
+	// model.User against the shared cache.
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.RoleMaster{}, &model.RoleSub{}))
+	require.NoError(t, db.AutoMigrate(
+		&model.RoleMaster{},
+		&model.RoleSub{},
+		&model.RoleMasterCspRoleMapping{},
+		&model.RoleMenuMapping{},
+	))
+	// model.UserPlatformRole/UserWorkspaceRole embed a `User`/`Role` belongsTo
+	// association field, which forces gorm to parse model.User — whose
+	// many2many tag targets these exact table names and collides with
+	// AutoMigrate, silently truncating them to a 2-column join table. Create
+	// the real columns by hand instead of via AutoMigrate for these two.
+	require.NoError(t, db.Exec(`CREATE TABLE mcmp_user_platform_roles (
+		user_id integer, role_id integer, created_at datetime, username text,
+		PRIMARY KEY (user_id, role_id)
+	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE mcmp_user_workspace_roles (
+		user_id integer, workspace_id integer, role_id integer,
+		username text, workspace_name text, role_name text, created_at datetime,
+		PRIMARY KEY (user_id, workspace_id, role_id)
+	)`).Error)
 	return db
 }
 

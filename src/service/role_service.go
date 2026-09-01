@@ -14,6 +14,7 @@ import (
 type RoleService struct {
 	db             *gorm.DB
 	roleRepository *repository.RoleRepository
+	menuRepository *repository.MenuRepository
 }
 
 // NewRoleService 새 RoleService 인스턴스 생성
@@ -21,6 +22,7 @@ func NewRoleService(db *gorm.DB) *RoleService {
 	return &RoleService{
 		db:             db,
 		roleRepository: repository.NewRoleRepository(db),
+		menuRepository: repository.NewMenuRepository(db),
 	}
 }
 
@@ -159,10 +161,22 @@ func (s *RoleService) DeleteRoleMaster(roleID uint) error {
 	return s.roleRepository.DeleteRoleMaster(roleID)
 }
 
-// DeleteRoleWithSubsAndMappings 역할과 관련된 모든 데이터를 트랜잭션으로 삭제
+// DeleteRoleWithSubsAndMappings 역할과 관련된 모든 데이터(메뉴 매핑, CSP 매핑, 서브, 마스터)를
+// 하나의 트랜잭션으로 삭제한다. 중간에 실패하면(예: 여전히 배정 중인 역할이라 FK 위반) 전체 롤백되어
+// role_master가 orphan으로 남는 부분삭제를 방지한다.
 func (s *RoleService) DeleteRoleWithSubsAndMappings(roleID uint) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. 역할 서브 타입들 삭제
+		// 1. 역할-메뉴 매핑 삭제 (플랫폼 서브가 없으면 매칭 0건, no-op)
+		if err := s.menuRepository.DeleteRoleMenuMappingsByRoleIDWithTx(tx, roleID); err != nil {
+			return fmt.Errorf("역할 메뉴 매핑 삭제 실패: %w", err)
+		}
+
+		// 2. CSP 역할 매핑 삭제 (CSP 서브가 없으면 매칭 0건, no-op)
+		if err := s.roleRepository.DeleteRoleCspRoleMappingsWithTx(tx, roleID); err != nil {
+			return fmt.Errorf("CSP 역할 매핑 삭제 실패: %w", err)
+		}
+
+		// 3. 역할 서브 타입들 삭제
 		if err := s.roleRepository.DeleteRoleSubsWithTx(tx, roleID, []constants.IAMRoleType{
 			constants.RoleTypePlatform,
 			constants.RoleTypeWorkspace,
@@ -171,18 +185,30 @@ func (s *RoleService) DeleteRoleWithSubsAndMappings(roleID uint) error {
 			return fmt.Errorf("역할 서브 타입 삭제 실패: %w", err)
 		}
 
-		// 2. CSP 역할 매핑 삭제
-		if err := s.roleRepository.DeleteRoleCspRoleMappings(roleID); err != nil {
-			return fmt.Errorf("CSP 역할 매핑 삭제 실패: %w", err)
-		}
-
-		// 3. 역할 마스터 삭제
+		// 4. 역할 마스터 삭제
 		if err := tx.Delete(&model.RoleMaster{}, roleID).Error; err != nil {
 			return fmt.Errorf("역할 마스터 삭제 실패: %w", err)
 		}
 
 		return nil
 	})
+}
+
+// IsRoleAssignedToUsers 해당 역할이 플랫폼 또는 워크스페이스 역할로 사용자에게 배정되어 있는지 확인
+func (s *RoleService) IsRoleAssignedToUsers(roleID uint) (bool, error) {
+	platformAssigned, err := s.roleRepository.ExistsUserPlatformRoleByRoleID(roleID)
+	if err != nil {
+		return false, err
+	}
+	if platformAssigned {
+		return true, nil
+	}
+
+	workspaceAssigned, err := s.roleRepository.ExistsUserWorkspaceRoleByRoleID(roleID)
+	if err != nil {
+		return false, err
+	}
+	return workspaceAssigned, nil
 }
 
 // AssignPlatformRole 플랫폼 역할 할당

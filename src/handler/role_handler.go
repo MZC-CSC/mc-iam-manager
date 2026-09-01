@@ -415,7 +415,15 @@ func (h *RoleHandler) DeleteRole(c echo.Context) error {
 	}
 
 	// Check if users are assigned to this role -> if yes, cannot delete
-	// TODO : Implement this.
+	assigned, err := h.roleService.IsRoleAssignedToUsers(roleIdInt)
+	if err != nil {
+		log.Printf("Failed to check role assignment - ID: %d, error: %v", roleIdInt, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to check role assignment: %v", err)})
+	}
+	if assigned {
+		log.Printf("Attempted to delete role assigned to users - ID: %d", roleIdInt)
+		return c.JSON(http.StatusConflict, map[string]string{"error": "Role is assigned to one or more users and cannot be deleted"})
+	}
 
 	// role.RoleSubs above may be preloaded scoped to reqRoleType only (see
 	// FindRoleByRoleID), which would hide a platform-type sub on this same
@@ -429,32 +437,10 @@ func (h *RoleHandler) DeleteRole(c echo.Context) error {
 		isPlatformRole = platformSub != nil
 	}
 
-	roleSubs := role.RoleSubs
-	for _, roleSub := range roleSubs {
-		// Delete role-platform mapping
-		if roleSub.RoleType == constants.RoleTypePlatform {
-			if err := h.menuService.DeleteRoleMenuMappingsByRoleID(roleIdInt); err != nil {
-				log.Printf("Failed to delete role menu mappings - ID: %d, error: %v", roleIdInt, err)
-			}
-		}
-
-		// role-workspace mapping deletion is handled in master-sub deletion.
-
-		// Delete role-csp mapping
-		if roleSub.RoleType == constants.RoleTypeCSP {
-			if err := h.roleService.DeleteRoleCspRoleMappingsByRoleId(roleIdInt); err != nil {
-				log.Printf("Failed to delete role csp mappings - ID: %d, error: %v", roleIdInt, err)
-			}
-		}
-	}
-
-	if err := h.roleService.DeleteRoleSubs(roleIdInt, []constants.IAMRoleType{constants.RoleTypePlatform, constants.RoleTypeWorkspace, constants.RoleTypeCSP}); err != nil {
-		log.Printf("Failed to delete role subs - ID: %d, error: %v", roleIdInt, err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to delete role: %v", err)})
-	}
-
-	// Delete role
-	if err := h.roleService.DeleteRoleMaster(roleIdInt); err != nil {
+	// Delete role menu mappings, CSP role mappings, role subs and role master
+	// atomically in a single transaction, so a mid-way failure (e.g. an FK
+	// violation from a stale assignment check race) leaves no orphaned data.
+	if err := h.roleService.DeleteRoleWithSubsAndMappings(roleIdInt); err != nil {
 		log.Printf("Failed to delete role - ID: %d, error: %v", roleIdInt, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to delete role: %v", err)})
 	}
