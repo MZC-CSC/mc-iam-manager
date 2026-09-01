@@ -414,14 +414,30 @@ func (h *RoleHandler) DeleteRole(c echo.Context) error {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "Predefined roles cannot be deleted"})
 	}
 
-	// Check if users are assigned to this role -> if yes, cannot delete
-	// TODO : Implement this.
+	// This endpoint deletes the entire role (role_master + every role_sub it has —
+	// platform/workspace/csp), regardless of reqRoleType; reqRoleType only scopes
+	// the existence lookup above. See TC-IAM-TECH-025-03: a request scoped to one
+	// type must still clean up a realm role tied to a platform sub on the same
+	// role_id. DeleteRoleWithSubsAndMappings itself only cascades to role_master
+	// once no role_sub is left, so passing all types here is what makes that
+	// happen for this "delete everything" caller.
+	targetRoleTypes := []constants.IAMRoleType{constants.RoleTypePlatform, constants.RoleTypeWorkspace, constants.RoleTypeCSP}
+
+	// Check if users are assigned to this role -> if yes, cannot delete.
+	assigned, err := h.roleService.IsRoleAssignedToUsers(roleIdInt, targetRoleTypes)
+	if err != nil {
+		log.Printf("Failed to check role assignment - ID: %d, error: %v", roleIdInt, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to check role assignment: %v", err)})
+	}
+	if assigned {
+		log.Printf("Attempted to delete role assigned to users - ID: %d", roleIdInt)
+		return c.JSON(http.StatusConflict, map[string]string{"error": "Role is assigned to one or more users and cannot be deleted"})
+	}
 
 	// role.RoleSubs above may be preloaded scoped to reqRoleType only (see
 	// FindRoleByRoleID), which would hide a platform-type sub on this same
-	// role_id when a different roleType was requested. DeleteRoleSubs below
-	// removes ALL sub types regardless of reqRoleType, so the Keycloak realm
-	// role check below must look this up independently of that scoping.
+	// role_id when a different roleType was requested, so the Keycloak realm
+	// role check below looks this up independently of that scoping.
 	isPlatformRole := false
 	if platformSub, err := h.roleService.GetRoleByID(roleIdInt, constants.RoleTypePlatform); err != nil {
 		log.Printf("Failed to check platform role sub - ID: %d, error: %v", roleIdInt, err)
@@ -429,32 +445,11 @@ func (h *RoleHandler) DeleteRole(c echo.Context) error {
 		isPlatformRole = platformSub != nil
 	}
 
-	roleSubs := role.RoleSubs
-	for _, roleSub := range roleSubs {
-		// Delete role-platform mapping
-		if roleSub.RoleType == constants.RoleTypePlatform {
-			if err := h.menuService.DeleteRoleMenuMappingsByRoleID(roleIdInt); err != nil {
-				log.Printf("Failed to delete role menu mappings - ID: %d, error: %v", roleIdInt, err)
-			}
-		}
-
-		// role-workspace mapping deletion is handled in master-sub deletion.
-
-		// Delete role-csp mapping
-		if roleSub.RoleType == constants.RoleTypeCSP {
-			if err := h.roleService.DeleteRoleCspRoleMappingsByRoleId(roleIdInt); err != nil {
-				log.Printf("Failed to delete role csp mappings - ID: %d, error: %v", roleIdInt, err)
-			}
-		}
-	}
-
-	if err := h.roleService.DeleteRoleSubs(roleIdInt, []constants.IAMRoleType{constants.RoleTypePlatform, constants.RoleTypeWorkspace, constants.RoleTypeCSP}); err != nil {
-		log.Printf("Failed to delete role subs - ID: %d, error: %v", roleIdInt, err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to delete role: %v", err)})
-	}
-
-	// Delete role
-	if err := h.roleService.DeleteRoleMaster(roleIdInt); err != nil {
+	// Delete every role sub this role has and their mappings (menu, CSP)
+	// atomically, cascading to role_master since no sub is left for it
+	// afterward. A mid-way failure (e.g. an FK violation from a stale assignment
+	// check race) rolls the whole transaction back, leaving no orphaned data.
+	if err := h.roleService.DeleteRoleWithSubsAndMappings(roleIdInt, targetRoleTypes); err != nil {
 		log.Printf("Failed to delete role - ID: %d, error: %v", roleIdInt, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to delete role: %v", err)})
 	}
@@ -1405,7 +1400,9 @@ func (h *RoleHandler) DeletePlatformRole(c echo.Context) error {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "미리 정의된 역할은 삭제할 수 없습니다"})
 	}
 
-	if err := h.roleService.DeleteRoleSubs(roleIDInt, []constants.IAMRoleType{constants.RoleTypePlatform}); err != nil {
+	// role_master는 여러 role_sub(platform/workspace/csp)를 동시에 가질 수 있으므로,
+	// 이 platform sub 삭제로 남은 sub이 없을 때만 role_master도 함께 삭제된다.
+	if err := h.roleService.DeleteRoleWithSubsAndMappings(roleIDInt, []constants.IAMRoleType{constants.RoleTypePlatform}); err != nil {
 		log.Printf("platform 역할 삭제 실패 - ID: %d, 에러: %v", roleIDInt, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 삭제 실패: %v", err)})
 	}
@@ -1461,7 +1458,9 @@ func (h *RoleHandler) DeleteWorkspaceRole(c echo.Context) error {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "미리 정의된 역할은 삭제할 수 없습니다"})
 	}
 
-	if err := h.roleService.DeleteRoleSubs(roleIDInt, []constants.IAMRoleType{constants.RoleTypeWorkspace}); err != nil {
+	// role_master는 여러 role_sub(platform/workspace/csp)를 동시에 가질 수 있으므로,
+	// 이 workspace sub 삭제로 남은 sub이 없을 때만 role_master도 함께 삭제된다.
+	if err := h.roleService.DeleteRoleWithSubsAndMappings(roleIDInt, []constants.IAMRoleType{constants.RoleTypeWorkspace}); err != nil {
 		log.Printf("workspace 역할 삭제 실패 - ID: %d, 에러: %v", roleIDInt, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 삭제 실패: %v", err)})
 	}
@@ -1629,12 +1628,19 @@ func (h *RoleHandler) DeleteCspRoleMaster(c echo.Context) error {
 		log.Printf("csp 역할 매핑 조회 실패 - ID: %d, 에러: %v", roleIDInt, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 매핑 조회 실패: %v", err)})
 	}
-	if len(mappings) > 0 {
+	// mappings는 이 role_id가 csp 타입 role_sub을 가지기만 해도 항상 1건(RoleMasterMapping
+	// 컨테이너 자체) 채워지므로, len(mappings) > 0으로는 실제 CSP 역할 매핑 유무를 알 수
+	// 없다 — 매핑 삭제 대상 role은 자기 자신도 csp sub을 가지므로 이 조건이 늘 참이 되어
+	// DeleteCspRoleMaster가 항상 403을 반환하는 버그였다. 실제 매핑 목록
+	// (RoleMasterCspRoleMappings)의 길이로 확인해야 한다.
+	if len(mappings) > 0 && len(mappings[0].RoleMasterCspRoleMappings) > 0 {
 		log.Printf("csp 역할 매핑이 있어 삭제 불가 - ID: %d", roleIDInt)
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "csp 역할 매핑이 있어 삭제 불가"})
 	}
 
-	if err := h.roleService.DeleteRoleSubs(roleIDInt, []constants.IAMRoleType{constants.RoleTypeCSP}); err != nil {
+	// role_master는 여러 role_sub(platform/workspace/csp)를 동시에 가질 수 있으므로,
+	// 이 csp sub 삭제로 남은 sub이 없을 때만 role_master도 함께 삭제된다.
+	if err := h.roleService.DeleteRoleWithSubsAndMappings(roleIDInt, []constants.IAMRoleType{constants.RoleTypeCSP}); err != nil {
 		log.Printf("csp 역할(master) 삭제 실패 - ID: %d, 에러: %v", roleIDInt, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 삭제 실패: %v", err)})
 	}

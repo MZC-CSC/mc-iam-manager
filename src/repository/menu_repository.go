@@ -417,3 +417,8 @@ func (r *MenuRepository) DeleteRoleMenuMappingsByRoleID(roleID uint) error {
 	query := r.db.Where("role_id = ?", roleID).Delete(&model.RoleMenuMapping{})
 	return query.Error
 }
+
+// DeleteRoleMenuMappingsByRoleIDWithTx 트랜잭션 내에서 해당 role 과 매핑된 모든 메뉴 매핑 삭제
+func (r *MenuRepository) DeleteRoleMenuMappingsByRoleIDWithTx(tx *gorm.DB, roleID uint) error {
+	return tx.Where("role_id = ?", roleID).Delete(&model.RoleMenuMapping{}).Error
+}
