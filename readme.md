@@ -267,16 +267,17 @@ Seed and runtime role-menu mapping for the platform console.
 
 ### Seed files (`asset/menu/`)
 
-- `menu.yaml` — menu tree (ids, parents, paths, menu resources)
+- `menu.yaml` — menu tree (ids, parents, paths, menu resources). This is a **local cache**, not the source of truth: `MC_WEB_CONSOLE_MENUYAML` normally points at mc-web-console's `conf/webconsole_menu_resources.yaml` (raw GitHub URL) — that file is the platform-wide canonical menu catalog, and `initial-menus`/`initial-menus2` download/accept it and overwrite this local copy as a side effect.
 - `permission.yaml` — role-centric seed: `permissions → role → menus | operations | csps` (`operations` / `csps` reserved)
-- `MC_WEB_CONSOLE_MENU_PERMISSIONS` — path or YAML URL to the permission seed (samples default to `asset/menu/permission.yaml`). Extension must be `.yaml` / `.yml`. Deprecated CSV URL is no longer the seed source.
+- `MC_WEB_CONSOLE_MENU_PERMISSIONS` — path or YAML URL to the permission seed (samples default to `asset/menu/permission.yaml`). Extension must be `.yaml` / `.yml`. The old CSV URL is no longer the seed source.
 - `MC_WEB_CONSOLE_MENUYAML` (optional) — remote menu tree YAML URL
 
 ### Initial / re-seed APIs (Platform Admin Bearer)
 
-- `POST /api/setup/initial-menus` — load `menu.yaml`
+- `POST /api/setup/initial-menus` — (re-)download `MC_WEB_CONSOLE_MENUYAML` (or local `filePath`) and load `menu.yaml`
+- `POST /api/setup/initial-menus2` — same registration, but accepts the menu YAML directly as the request body (no download step) — useful for registering unmerged/local changes before they land on the URL `initial-menus` fetches
 - `GET /api/setup/initial-role-menu-permission-yaml` — seed from `permission.yaml` (also runs inside `POST /api/initial-admin`)
-- `GET /api/setup/initial-role-menu-permission` — **Deprecated** CSV; do not use for new installs
+- `GET /api/setup/initial-role-menu-permission` — **Removed**; this CSV route no longer exists. Use `initial-role-menu-permission-yaml`
 - Setup scripts (`conf/mc-iam-manager/1_setup_auto.sh`): after menus, Step 4-1 calls the YAML seed without `filePath` (server resolves env / local asset)
 
 ### Runtime change safety
@@ -287,6 +288,10 @@ Seed and runtime role-menu mapping for the platform console.
 - Day-to-day: `POST` / `DELETE` `/api/menus/platform-roles` for individual mappings
 
 Distinguish: `permission.yaml` is the desired seed template; `role-permission-backup` is an actual DB snapshot.
+
+### Demo RBAC (optional, not part of onboarding)
+
+`scripts/demo/setup-demo-rbac.sh` creates 15 additional demo roles (5 modules × 3 tiers: viewer/operator/admin) on top of the 5 base roles above, and applies their menu mappings from `asset/menu/backups/role-permission-backup-demo-rbac.yaml` via `POST /api/setup/restore-role-permissions?mode=additive`. It is a separate, manual, idempotent script — no install script calls it automatically. See the script header comment for usage.
 
 ## Operations Management
 
@@ -340,8 +345,8 @@ swag init --output ./docs
    ```bash
    POST /api/auth/login
    {
-     "id": "<MCIAMMANAGER_PLATFORMADMIN_ID>",
-     "password": "<MCIAMMANAGER_PLATFORMADMIN_PASSWORD>"
+     "id": "<MC_IAM_MANAGER_PLATFORMADMIN_ID>",
+     "password": "<MC_IAM_MANAGER_PLATFORMADMIN_PASSWORD>"
    }
    ```
 
