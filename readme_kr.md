@@ -292,7 +292,7 @@ curl https://<your domain or localhost>:<port>/readyz
 
 ### 데모 RBAC (선택, 온보딩에 포함되지 않음)
 
-`scripts/demo/setup-demo-rbac.sh`는 위 기본 5역할과 별개로 15개 데모 역할(5모듈×3단계: viewer/operator/admin)을 만들고, `asset/menu/backups/role-permission-backup-demo-rbac.yaml`의 메뉴 매핑을 `POST /api/setup/restore-role-permissions?mode=additive`로 적용한다. 완전히 별도의 수동·멱등 스크립트이며 어떤 설치 스크립트도 자동으로 호출하지 않는다. 사용법은 스크립트 상단 주석 참고.
+`scripts/demo/setup-demo-rbac.sh`는 역할 슬롯 15개(5모듈×3단계: viewer/operator/admin)를 준비한다 — 그중 13개는 순수 신규이고, 2개(`billviewer`/`billadmin`)는 아래([역할 관리](#역할-관리)) 기본 역할과 겹쳐 중복 생성하지 않고 재사용한다. `asset/menu/backups/role-permission-backup-demo-rbac.yaml`의 메뉴 매핑을 `POST /api/setup/restore-role-permissions?mode=additive`로 적용한다. 완전히 별도의 수동·멱등 스크립트이며 어떤 설치 스크립트도 자동으로 호출하지 않는다. 사용법은 스크립트 상단 주석 참고.
 
 ## 운영 관리
 
