@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 5개 모듈(Workflow/Application/Data/Cost/Observability) x 3단계(viewer/operator/admin) 데모용
-# 역할 15종·팀(조직) 20개·사용자 15명을 mc-iam-manager에 생성한다.
+# 역할 슬롯 15종(13개 신규 + 기존 billviewer/billadmin 재사용 2개)·팀(조직) 20개·사용자 15명을 mc-iam-manager에 생성한다.
 #
 # 온보딩(1_setup_auto.sh/1_setup_manual.sh)과는 완전히 분리된, 플랫폼이 이미 뜬 뒤 사람이 필요할 때
 # 한 번 수동으로 실행하는 선택적 스크립트다(과거 이 프로젝트에 있었던 add_demo_user.sh와 같은 성격 —

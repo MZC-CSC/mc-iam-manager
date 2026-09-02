@@ -291,7 +291,7 @@ Distinguish: `permission.yaml` is the desired seed template; `role-permission-ba
 
 ### Demo RBAC (optional, not part of onboarding)
 
-`scripts/demo/setup-demo-rbac.sh` creates 15 additional demo roles (5 modules × 3 tiers: viewer/operator/admin) on top of the 5 base roles above, and applies their menu mappings from `asset/menu/backups/role-permission-backup-demo-rbac.yaml` via `POST /api/setup/restore-role-permissions?mode=additive`. It is a separate, manual, idempotent script — no install script calls it automatically. See the script header comment for usage.
+`scripts/demo/setup-demo-rbac.sh` provisions 15 role slots (5 modules × 3 tiers: viewer/operator/admin) — 13 of them genuinely new, and 2 (`billviewer`/`billadmin`) reusing the matching base roles below (see [Role Management](#role-management)) instead of duplicating them. It applies their menu mappings from `asset/menu/backups/role-permission-backup-demo-rbac.yaml` via `POST /api/setup/restore-role-permissions?mode=additive`. It is a separate, manual, idempotent script — no install script calls it automatically. See the script header comment for usage.
 
 ## Operations Management
 
