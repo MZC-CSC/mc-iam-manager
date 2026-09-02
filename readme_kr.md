@@ -268,16 +268,17 @@ curl https://<your domain or localhost>:<port>/readyz
 
 ### 시드 파일 (`asset/menu/`)
 
-- `menu.yaml` — 메뉴 트리 (id, parent, path, menu resource)
+- `menu.yaml` — 메뉴 트리 (id, parent, path, menu resource). 이 파일은 **로컬 캐시**이지 진실 소스가 아니다 — `MC_WEB_CONSOLE_MENUYAML`은 평소 mc-web-console의 `conf/webconsole_menu_resources.yaml`(raw GitHub URL)을 가리키며, 그 파일이 플랫폼 전체의 canonical 메뉴 카탈로그다. `initial-menus`/`initial-menus2`가 그 내용을 받아 이 로컬 사본에 덮어쓴다.
 - `permission.yaml` — 역할 중심 시드: `permissions → role → menus | operations | csps` (`operations` / `csps`는 예약)
 - `MC_WEB_CONSOLE_MENU_PERMISSIONS` — permission 시드의 경로 또는 YAML URL (샘플 기본값: `asset/menu/permission.yaml`). 확장자는 `.yaml` / `.yml`이어야 함. 구 CSV URL은 더 이상 시드 소스가 아님.
 - `MC_WEB_CONSOLE_MENUYAML` (선택) — 원격 메뉴 트리 YAML URL
 
 ### 초기 / 재시드 API (Platform Admin Bearer)
 
-- `POST /api/setup/initial-menus` — `menu.yaml` 로드
+- `POST /api/setup/initial-menus` — `MC_WEB_CONSOLE_MENUYAML`(또는 로컬 `filePath`)을 (재)다운로드해 `menu.yaml`로 로드
+- `POST /api/setup/initial-menus2` — 동일한 등록이지만 메뉴 YAML을 요청 바디로 직접 받음(다운로드 단계 없음) — `initial-menus`가 참조하는 URL에 아직 병합되지 않은 로컬 변경을 먼저 등록해볼 때 유용
 - `GET /api/setup/initial-role-menu-permission-yaml` — `permission.yaml`에서 시드 (`POST /api/initial-admin` 내부에서도 실행)
-- `GET /api/setup/initial-role-menu-permission` — **Deprecated** CSV; 신규 설치에 사용하지 말 것
+- `GET /api/setup/initial-role-menu-permission` — **삭제됨**; 이 CSV 라우트는 더 이상 존재하지 않음. `initial-role-menu-permission-yaml` 사용
 - 설정 스크립트 (`conf/mc-iam-manager/1_setup_auto.sh`): 메뉴 등록 후 Step 4-1에서 `filePath` 없이 YAML 시드 호출 (서버가 env / 로컬 asset 해석)
 
 ### 런타임 변경 시 안전장치
@@ -288,6 +289,10 @@ curl https://<your domain or localhost>:<port>/readyz
 - 일상 변경: 개별 매핑은 `POST` / `DELETE` `/api/menus/platform-roles`
 
 구분: `permission.yaml`은 시드용 목표 템플릿이고, `role-permission-backup`은 실제 DB 스냅샷입니다.
+
+### 데모 RBAC (선택, 온보딩에 포함되지 않음)
+
+`scripts/demo/setup-demo-rbac.sh`는 위 기본 5역할과 별개로 15개 데모 역할(5모듈×3단계: viewer/operator/admin)을 만들고, `asset/menu/backups/role-permission-backup-demo-rbac.yaml`의 메뉴 매핑을 `POST /api/setup/restore-role-permissions?mode=additive`로 적용한다. 완전히 별도의 수동·멱등 스크립트이며 어떤 설치 스크립트도 자동으로 호출하지 않는다. 사용법은 스크립트 상단 주석 참고.
 
 ## 운영 관리
 
