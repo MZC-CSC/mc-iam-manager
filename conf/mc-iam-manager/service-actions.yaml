@@ -2293,7 +2293,7 @@ serviceActions:
         _meta:
             version: 0.13.2
             repository: https://github.com/cloud-barista/cb-tumblebug
-            generatedAt: "2026-09-03T01:04:31Z"
+            generatedAt: "2026-09-03T04:06:53Z"
         AddNLBNodes:
             method: post
             resourcePath: /ns/{nsId}/infra/{infraId}/nlb/{nlbId}/node
