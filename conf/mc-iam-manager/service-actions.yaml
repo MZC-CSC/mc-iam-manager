@@ -1,9 +1,9 @@
 serviceActions:
     mc-application-manager:
         _meta:
-            version: 0.5.0
+            version: 0.6.1
             repository: https://github.com/m-cmp/mc-application-manager
-            generatedAt: "2026-06-01T02:11:43Z"
+            generatedAt: "2026-09-03T04:08:54Z"
         checkConnectionUsingPOST:
             method: post
             resourcePath: /oss/connection-check
@@ -270,9 +270,9 @@ serviceActions:
             description: file upload
     mc-cost-optimizer:
         _meta:
-            version: 0.5.0
+            version: 0.6.3
             repository: https://github.com/m-cmp/mc-cost-optimizer
-            generatedAt: "2026-06-01T02:11:43Z"
+            generatedAt: "2026-09-03T04:08:54Z"
         getAbrnormalRcmd:
             method: post
             resourcePath: /api/costopti/be/opti/abnormalRcmd
@@ -333,7 +333,7 @@ serviceActions:
         _meta:
             version: 0.6.2
             repository: https://github.com/m-cmp/mc-iam-manager
-            generatedAt: "2026-09-01T00:33:41Z"
+            generatedAt: "2026-09-03T04:08:54Z"
         CreateFrameworkService:
             method: post
             resourcePath: /api/mcmp-apis
@@ -1276,13 +1276,17 @@ serviceActions:
             description: Validate CSP account by checking actual CSP infrastructure (IDP provider existence, role trust policy, or credential validity) for each linked CspRole
     mc-infra-connector:
         _meta:
-            version: main
+            version: 0.13.2
             repository: https://github.com/cloud-barista/cb-spider
-            generatedAt: "2026-06-01T02:11:43Z"
+            generatedAt: "2026-09-03T04:08:54Z"
         add-favorite-imagespec:
             method: post
             resourcePath: /vm/imagespecfavorite
             description: Add an Image and Spec combination to favorites
+        add-nic-privateip:
+            method: post
+            resourcePath: /nic/{Name}/privateip
+            description: Add a secondary private IP to a NIC. Leave PrivateIP empty for CSP auto-assignment.
         add-nlb-vm:
             method: post
             resourcePath: /nlb/{Name}/vms
@@ -1304,15 +1308,32 @@ serviceActions:
             resourcePath: /tag
             description: |-
                 Add a tag to a specified resource.
-                ※ Resource types: VPC, SUBNET, SG, KEY, VM, NLB, DISK, MYIMAGE, CLUSTER
+                ※ Resource types: VPC, SUBNET, SG, KEY, VM, NLB, DISK, MYIMAGE, CLUSTER, RDBMS
+                ※ RDBMS: tagging support (mysql, mariadb, etc.) varies by CSP driver — check GetMetaInfo().SupportsTag before use
         any-call:
             method: post
             resourcePath: /anycall
             description: "Execute a custom function (FID) with key-value parameters through AnyCall. \U0001F577️ [[Development Guide](https://github.com/cloud-barista/cb-spider/wiki/AnyCall-API-Extension-Guide)]"
+        assign-vm-default-publicip:
+            method: post
+            resourcePath: /vm/{Name}/publicip
+            description: "Create a new PublicIP and attach it to the VM's default NIC (nic0) - the same effect as creating the VM with AssignPublicIP=true. Fails if the VM already has a default PublicIP. \U0001F577️"
+        associate-publicip:
+            method: put
+            resourcePath: /publicip/{Name}/associate
+            description: Associate a Public IP address with a VM.
         attach-disk:
             method: put
             resourcePath: /disk/{Name}/attach
             description: Attach an existing Disk to a VM.
+        attach-nic:
+            method: put
+            resourcePath: /nic/{Name}/attach
+            description: Attach a NIC to a VM instance.
+        attach-vm-publicip:
+            method: put
+            resourcePath: /vm/{Name}/publicip/{PublicIPName}
+            description: "Attach a PublicIP that was previously created via the PublicIP Manager (POST /publicip) to the VM's default NIC (nic0). Fails if the VM already has a default PublicIP. \U0001F577️"
         bulk-import-favorite-imagespec:
             method: post
             resourcePath: /vm/imagespecfavorite/bulk
@@ -1359,14 +1380,26 @@ serviceActions:
             method: get
             resourcePath: /countmyimage
             description: Get the total number of MyImages across all connections.
+        count-all-nics:
+            method: get
+            resourcePath: /countnic
+            description: Get the total number of NICs registered across all connections.
         count-all-nlb:
             method: get
             resourcePath: /countnlb
             description: Get the total number of Network Load Balancers (NLBs) across all connections.
+        count-all-publicips:
+            method: get
+            resourcePath: /countpublicip
+            description: Get the total number of Public IPs registered across all connections.
         count-all-rdbms:
             method: get
             resourcePath: /countrdbms
             description: Get the total number of RDBMS instances across all connections.
+        count-all-s3-bucket:
+            method: get
+            resourcePath: /counts3
+            description: Get the total number of S3 Buckets registered across all connections. (CB-Spider special feature)
         count-all-securitygroup:
             method: get
             resourcePath: /countsecuritygroup
@@ -1403,10 +1436,18 @@ serviceActions:
             method: get
             resourcePath: /countmyimage/{ConnectionName}
             description: Get the total number of MyImages for a specific connection.
+        count-nic-by-connection:
+            method: get
+            resourcePath: /countnic/{ConnectionName}
+            description: Get the total number of NICs for a specific connection.
         count-nlb-by-connection:
             method: get
             resourcePath: /countnlb/{ConnectionName}
             description: Get the total number of Network Load Balancers (NLBs) for a specific connection.
+        count-publicip-by-connection:
+            method: get
+            resourcePath: /countpublicip/{ConnectionName}
+            description: Get the total number of Public IPs for a specific connection.
         count-rdbms-by-connection:
             method: get
             resourcePath: /countrdbms/{ConnectionName}
@@ -1455,14 +1496,26 @@ serviceActions:
             method: post
             resourcePath: /myimage
             description: "Create a new MyImage snapshot from a specified VM. \U0001F577️ [[Concept Guide](https://github.com/cloud-barista/cb-spider/wiki/MyImage-and-Driver-API)], [[Snapshot-MyImage,Disk Guide](https://github.com/cloud-barista/cb-spider/wiki/VM-Snapshot,-MyImage-and-Disk-Overview)]"
+        create-nic:
+            method: post
+            resourcePath: /nic
+            description: Create a new Network Interface Card (NIC).
         create-nlb:
             method: post
             resourcePath: /nlb
             description: "Create a new Network Load Balancer (NLB) with specified configurations. \U0001F577️ [[Concept Guide](https://github.com/cloud-barista/cb-spider/wiki/Network-Load-Balancer-and-Driver-API)]"
+        create-publicip:
+            method: post
+            resourcePath: /publicip
+            description: Allocate a new Public IP address.
         create-rdbms:
             method: post
             resourcePath: /rdbms
             description: Create a new Relational Database (RDBMS) with the specified configuration.
+        create-rdbms-database:
+            method: post
+            resourcePath: /rdbms/{Name}/databases
+            description: Create a database inside an RDBMS instance using the CSP-native API.
         create-s3-bucket:
             method: put
             resourcePath: /s3/{BucketName}
@@ -1529,6 +1582,10 @@ serviceActions:
             method: delete
             resourcePath: /csprdbms/{Id}
             description: Delete a specified CSP RDBMS.
+        delete-csp-s3-bucket:
+            method: delete
+            resourcePath: /csps3/{Id}
+            description: Delete a specified CSP S3 Bucket directly from the CSP without affecting CB-Spider metadata. (CB-Spider special feature)
         delete-csp-securitygroup:
             method: delete
             resourcePath: /cspsecuritygroup/{Id}
@@ -1553,14 +1610,26 @@ serviceActions:
             method: delete
             resourcePath: /myimage/{Name}
             description: Delete a specified MyImage.
+        delete-nic:
+            method: delete
+            resourcePath: /nic/{Name}
+            description: Delete a NIC.
         delete-nlb:
             method: delete
             resourcePath: /nlb/{Name}
             description: Delete a specified Network Load Balancer (NLB).
+        delete-publicip:
+            method: delete
+            resourcePath: /publicip/{Name}
+            description: Release (delete) a Public IP address.
         delete-rdbms:
             method: delete
             resourcePath: /rdbms/{Name}
             description: Delete a specified RDBMS instance.
+        delete-rdbms-database:
+            method: delete
+            resourcePath: /rdbms/{Name}/databases/{DBName}
+            description: Drop a database inside an RDBMS instance using the CSP-native API.
         delete-recent-imagespec:
             method: delete
             resourcePath: /vm/imagespecrecent
@@ -1590,6 +1659,10 @@ serviceActions:
             method: delete
             resourcePath: /securitygroup/{Name}
             description: Delete a specified Security Group.
+        delete-topology-layout:
+            method: delete
+            resourcePath: /topology/layout
+            description: Delete one named topology layout version
         delete-vpc:
             method: delete
             resourcePath: /vpc/{Name}
@@ -1602,6 +1675,18 @@ serviceActions:
             method: put
             resourcePath: /disk/{Name}/detach
             description: Detach an existing Disk from a VM.
+        detach-nic:
+            method: put
+            resourcePath: /nic/{Name}/detach
+            description: Detach a NIC from its VM instance.
+        detach-vm-publicip:
+            method: delete
+            resourcePath: /vm/{Name}/publicip/{PublicIPName}
+            description: "Detach a PublicIP previously attached via AttachVMPublicIP, WITHOUT deleting the PublicIP resource itself (it belongs to the user). Fails if the VM has no default PublicIP assigned. \U0001F577️"
+        disassociate-publicip:
+            method: put
+            resourcePath: /publicip/{Name}/disassociate
+            description: Remove the VM association from a Public IP address.
         download-s3-object:
             method: get
             resourcePath: /s3/{BucketName}/{ObjectKey}
@@ -1662,6 +1747,10 @@ serviceActions:
             method: get
             resourcePath: /cspvm/{Id}
             description: Retrieve details of a specific CSP Virtual Machine (VM).
+        get-db-spec:
+            method: get
+            resourcePath: /dbspec/{Name}
+            description: Retrieve details (vCPU/Memory/StorageSize) of a specific Database instance spec.
         get-disk:
             method: get
             resourcePath: /disk/{Name}
@@ -1686,6 +1775,18 @@ serviceActions:
             method: get
             resourcePath: /myimage/{Name}
             description: Retrieve details of a specific MyImage.
+        get-nic:
+            method: get
+            resourcePath: /nic/{Name}
+            description: Retrieve details of a specific NIC.
+        get-nic-osconfigscript:
+            method: get
+            resourcePath: /nic/{Name}/osconfigscript
+            description: |-
+                Return a bash script to be executed inside the VM OS after a secondary NIC is attached.
+                AWS uses DHCP-based routing and returns an empty script.
+                Azure, Alibaba, Tencent, IBM, and OpenStack require manual OS-level interface
+                and routing table configuration; this endpoint returns the ready-to-run script.
         get-nlb:
             method: get
             resourcePath: /nlb/{Name}
@@ -1694,10 +1795,18 @@ serviceActions:
             method: post
             resourcePath: /getnlbowner
             description: Retrieve the owner VPC of a specified Network Load Balancer (NLB).
+        get-org-db-spec:
+            method: get
+            resourcePath: /dborgspec/{Name}
+            description: Retrieve details of a specific Original Database instance spec.
         get-org-vm-spec:
             method: get
             resourcePath: /vmorgspec/{Name}
             description: Retrieve details of a specific Original VM Spec.
+        get-publicip:
+            method: get
+            resourcePath: /publicip/{Name}
+            description: Retrieve details of a specific Public IP.
         get-quota-info:
             method: get
             resourcePath: /quotainfo
@@ -1791,7 +1900,12 @@ serviceActions:
             resourcePath: /tag/{Key}
             description: |-
                 Retrieve a specific tag for a specified resource.
-                ※ Resource types: VPC, SUBNET, SG, KEY, VM, NLB, DISK, MYIMAGE, CLUSTER
+                ※ Resource types: VPC, SUBNET, SG, KEY, VM, NLB, DISK, MYIMAGE, CLUSTER, RDBMS
+                ※ RDBMS: tagging support (mysql, mariadb, etc.) varies by CSP driver — check GetMetaInfo().SupportsTag before use
+        get-topology-layout:
+            method: get
+            resourcePath: /topology/layout/version
+            description: Get one saved topology layout version (full LayoutJSON)
         get-vm:
             method: get
             resourcePath: /vm/{Name}
@@ -1890,7 +2004,7 @@ serviceActions:
         list-all-disk-info:
             method: get
             resourcePath: /alldiskinfo
-            description: Retrieve a list of all Disk information associated with all connections.
+            description: Retrieve a comprehensive list of all Disk information associated with a specific connection, <br> including those mapped between CB-Spider and the CSP, <br> only registered in CB-Spider's metadata, <br> and only existing in the CSP.
         list-all-keypair:
             method: get
             resourcePath: /allkeypair
@@ -1898,7 +2012,7 @@ serviceActions:
         list-all-keypair-info:
             method: get
             resourcePath: /allkeypairinfo
-            description: Retrieve a list of KeyPair information associated with all connections.
+            description: Retrieve a comprehensive list of all KeyPair information associated with a specific connection, <br> including those mapped between CB-Spider and the CSP, <br> only registered in CB-Spider's metadata, <br> and only existing in the CSP.
         list-all-myimage:
             method: get
             resourcePath: /allmyimage
@@ -1922,7 +2036,15 @@ serviceActions:
         list-all-rdbms-info:
             method: get
             resourcePath: /allrdbmsinfo
-            description: Retrieve a list of all RDBMS information associated with all connections.
+            description: Retrieve a comprehensive list of all RDBMS information associated with a specific connection, <br> including those mapped between CB-Spider and the CSP, <br> only registered in CB-Spider's metadata, <br> and only existing in the CSP.
+        list-all-s3-bucket:
+            method: get
+            resourcePath: /alls3
+            description: Retrieve a comprehensive list of all S3 Buckets associated with a specific connection, <br> including those mapped between CB-Spider and the CSP, <br> only registered in CB-Spider's metadata, <br> and only existing in the CSP. (CB-Spider special feature)
+        list-all-s3-bucket-info:
+            method: get
+            resourcePath: /alls3info
+            description: Retrieve detailed info of all S3 Buckets associated with a specific connection, <br> including those mapped between CB-Spider and the CSP, <br> only registered in CB-Spider's metadata, <br> and only existing in the CSP. (CB-Spider special feature)
         list-all-securitygroup:
             method: get
             resourcePath: /allsecuritygroup
@@ -1930,7 +2052,7 @@ serviceActions:
         list-all-securitygroup-info:
             method: get
             resourcePath: /allsecuritygroupinfo
-            description: Retrieve a list of Security Group information associated with all connections.
+            description: Retrieve a comprehensive list of all Security Group information associated with a specific connection, <br> including those mapped between CB-Spider and the CSP, <br> only registered in CB-Spider's metadata, <br> and only existing in the CSP.
         list-all-vm:
             method: get
             resourcePath: /allvm
@@ -1963,6 +2085,10 @@ serviceActions:
             method: get
             resourcePath: /credential
             description: Retrieve a list of registered Credentials.
+        list-db-spec:
+            method: get
+            resourcePath: /dbspec
+            description: Retrieve a list of Database instance specs (vCPU/Memory/StorageSize details) for a specific DB engine, associated with a specific connection.
         list-disk:
             method: get
             resourcePath: /disk
@@ -1987,10 +2113,18 @@ serviceActions:
             method: get
             resourcePath: /myimage
             description: Retrieve a list of MyImages associated with a specific connection.
+        list-nic:
+            method: get
+            resourcePath: /nic
+            description: Retrieve a list of Network Interface Cards.
         list-nlb:
             method: get
             resourcePath: /nlb
             description: Retrieve a list of Network Load Balancers (NLBs) associated with a specific connection.
+        list-org-db-spec:
+            method: get
+            resourcePath: /dborgspec
+            description: Retrieve a list of Original Database instance specs for a specific DB engine, associated with a specific connection. <br> The response structure may vary depending on the requested CSP.
         list-org-region:
             method: get
             resourcePath: /orgregion
@@ -2011,6 +2145,10 @@ serviceActions:
             method: get
             resourcePath: /productfamily/{RegionName}
             description: "Retrieve a list of Product Families associated with a specific connection and region. \U0001F577️ [[Concept Guide](https://github.com/cloud-barista/cb-spider/wiki/Price-Info-and-Cloud-Driver-API)], \U0001F577️ [[User Guide](https://github.com/cloud-barista/cb-spider/wiki/RestAPI-Multi%E2%80%90Cloud-Price-Information-Guide)]"
+        list-publicip:
+            method: get
+            resourcePath: /publicip
+            description: Retrieve a list of Public IP addresses.
         list-quota-service-type:
             method: get
             resourcePath: /quotaservicetype
@@ -2019,6 +2157,14 @@ serviceActions:
             method: get
             resourcePath: /rdbms
             description: Retrieve a list of RDBMS instances associated with a specific connection.
+        list-rdbms-databases:
+            method: get
+            resourcePath: /rdbms/{Name}/databases
+            description: List databases inside an RDBMS instance using the CSP-native API.
+        list-rdbms-engine:
+            method: get
+            resourcePath: /rdbmsengine
+            description: Retrieve the list of RDBMS engines (e.g., mysql, mariadb, postgresql) that the CSP supports for a specific connection, derived from the connection's driver capability information (GET /driver/capability).
         list-recent-imagespec:
             method: get
             resourcePath: /vm/imagespecrecent
@@ -2048,7 +2194,12 @@ serviceActions:
             resourcePath: /tag
             description: |-
                 Retrieve a list of tags for a specified resource.
-                ※ Resource types: VPC, SUBNET, SG, KEY, VM, NLB, DISK, MYIMAGE, CLUSTER
+                ※ Resource types: VPC, SUBNET, SG, KEY, VM, NLB, DISK, MYIMAGE, CLUSTER, RDBMS
+                ※ RDBMS: tagging support (mysql, mariadb, etc.) varies by CSP driver — check GetMetaInfo().SupportsTag before use
+        list-topology-layouts:
+            method: get
+            resourcePath: /topology/layout
+            description: List all saved topology layout versions
         list-vm:
             method: get
             resourcePath: /vm
@@ -2155,10 +2306,18 @@ serviceActions:
             method: post
             resourcePath: /regmyimage
             description: Register a new MyImage with the specified name and CSP ID.
+        register-nic:
+            method: post
+            resourcePath: /regnic
+            description: Register an existing NIC with the specified name and CSP ID.
         register-nlb:
             method: post
             resourcePath: /regnlb
             description: Register a new Network Load Balancer (NLB) with the specified name and CSP ID.
+        register-publicip:
+            method: post
+            resourcePath: /regpublicip
+            description: Register a new Public IP with the specified name and CSP ID.
         register-rdbms:
             method: post
             resourcePath: /regrdbms
@@ -2167,6 +2326,10 @@ serviceActions:
             method: post
             resourcePath: /region
             description: "Register a new Region. \U0001F577️ [[User Guide](https://github.com/cloud-barista/cb-spider/wiki/features-and-usages#3-cloud-regionzone-%EC%A0%95%EB%B3%B4-%EB%93%B1%EB%A1%9D-%EB%B0%8F-%EA%B4%80%EB%A6%AC)]"
+        register-s3-bucket:
+            method: post
+            resourcePath: /regs3
+            description: Register an existing CSP S3 bucket into CB-Spider metadata with a user-defined name. (CB-Spider special feature)
         register-securitygroup:
             method: post
             resourcePath: /regsecuritygroup
@@ -2187,6 +2350,10 @@ serviceActions:
             method: delete
             resourcePath: /vpc/{VPCName}/cspsubnet/{Id}
             description: Remove an existing CSP Subnet from a VPC.
+        remove-nic-privateip:
+            method: delete
+            resourcePath: /nic/{Name}/privateip/{IP}
+            description: Remove a secondary private IP from a NIC.
         remove-nlb-vm:
             method: delete
             resourcePath: /nlb/{Name}/vms
@@ -2208,7 +2375,12 @@ serviceActions:
             resourcePath: /tag/{Key}
             description: |-
                 Remove a specific tag from a specified resource.
-                ※ Resource types: VPC, SUBNET, SG, KEY, VM, NLB, DISK, MYIMAGE, CLUSTER
+                ※ Resource types: VPC, SUBNET, SG, KEY, VM, NLB, DISK, MYIMAGE, CLUSTER, RDBMS
+                ※ RDBMS: tagging support (mysql, mariadb, etc.) varies by CSP driver — check GetMetaInfo().SupportsTag before use
+        save-topology-layout:
+            method: post
+            resourcePath: /topology/layout
+            description: Save (upsert) a named topology layout version
         set-nodegroup-autoscaling:
             method: put
             resourcePath: /cluster/{Name}/nodegroup/{NodeGroupName}/onautoscaling
@@ -2225,6 +2397,10 @@ serviceActions:
             method: delete
             resourcePath: /vm/{Name}
             description: Terminate a specified Virtual Machine (VM).
+        unassign-vm-default-publicip:
+            method: delete
+            resourcePath: /vm/{Name}/publicip
+            description: "Disassociate and DELETE the PublicIP that was assigned via AssignVMDefaultPublicIP. Fails if the VM has no default PublicIP assigned. \U0001F577️"
         unregister-cluster:
             method: delete
             resourcePath: /regcluster/{Name}
@@ -2249,10 +2425,18 @@ serviceActions:
             method: delete
             resourcePath: /regmyimage/{Name}
             description: Unregister a MyImage with the specified name.
+        unregister-nic:
+            method: delete
+            resourcePath: /regnic/{Name}
+            description: Unregister a NIC with the specified name.
         unregister-nlb:
             method: delete
             resourcePath: /regnlb/{Name}
             description: Unregister a Network Load Balancer (NLB) with the specified name.
+        unregister-publicip:
+            method: delete
+            resourcePath: /regpublicip/{Name}
+            description: Unregister a Public IP with the specified name.
         unregister-rdbms:
             method: delete
             resourcePath: /regrdbms/{Name}
@@ -2261,6 +2445,10 @@ serviceActions:
             method: delete
             resourcePath: /region/{RegionName}
             description: Unregister a specific Region.
+        unregister-s3-bucket:
+            method: delete
+            resourcePath: /regs3/{Name}
+            description: Remove an S3 bucket mapping from CB-Spider metadata without deleting it from the CSP. (CB-Spider special feature)
         unregister-securitygroup:
             method: delete
             resourcePath: /regsecuritygroup/{Name}
@@ -2293,7 +2481,7 @@ serviceActions:
         _meta:
             version: 0.13.2
             repository: https://github.com/cloud-barista/cb-tumblebug
-            generatedAt: "2026-09-03T04:06:53Z"
+            generatedAt: "2026-09-03T04:08:54Z"
         AddNLBNodes:
             method: post
             resourcePath: /ns/{nsId}/infra/{infraId}/nlb/{nlbId}/node
@@ -4875,9 +5063,9 @@ serviceActions:
                 POST .../rdbms would use.
     mc-workflow-manager:
         _meta:
-            version: 0.5.0
+            version: 0.6.1
             repository: https://github.com/m-cmp/mc-workflow-manager
-            generatedAt: "2026-06-01T02:11:43Z"
+            generatedAt: "2026-09-03T04:08:54Z"
         checkConnectionUsingGET:
             method: get
             resourcePath: /readyz

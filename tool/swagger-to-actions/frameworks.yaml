@@ -33,21 +33,21 @@ frameworks:
 
   # MC-Application-Manager - Application Deployment Management
   - name: mc-application-manager
-    version: "0.5.0"                    # Latest release: v0.5.0
+    version: "0.6.1"                    # Latest release: v0.6.1
     repository: https://github.com/m-cmp/mc-application-manager
-    swagger: https://raw.githubusercontent.com/m-cmp/mc-application-manager/v0.5.0/swagger.json
+    swagger: https://raw.githubusercontent.com/m-cmp/mc-application-manager/v0.6.1/swagger.json
 
   # MC-Cost-Optimizer - Cost Optimization
   - name: mc-cost-optimizer
-    version: "0.5.0"                    # Latest release: v0.5.0
+    version: "0.6.3"                    # Latest tag: v0.6.3
     repository: https://github.com/m-cmp/mc-cost-optimizer
-    swagger: https://raw.githubusercontent.com/m-cmp/mc-cost-optimizer/v0.5.0/swagger.yaml
+    swagger: https://raw.githubusercontent.com/m-cmp/mc-cost-optimizer/v0.6.3/swagger.yaml
 
   # MC-Workflow-Manager - Workflow Orchestration
   - name: mc-workflow-manager
-    version: "0.5.0"                    # Latest release: v0.5.0
+    version: "0.6.1"                    # Latest tag: v0.6.1
     repository: https://github.com/m-cmp/mc-workflow-manager
-    swagger: https://raw.githubusercontent.com/m-cmp/mc-workflow-manager/v0.5.0/swagger.json
+    swagger: https://raw.githubusercontent.com/m-cmp/mc-workflow-manager/v0.6.1/swagger.json
 
   # MC-Infra-Manager - Multi-Cloud Infrastructure Management
   - name: mc-infra-manager
@@ -57,9 +57,9 @@ frameworks:
 
   # MC-Infra-Connector - Cloud Infrastructure Connection
   - name: mc-infra-connector
-    version: "main"
+    version: "0.13.2"
     repository: https://github.com/cloud-barista/cb-spider
-    swagger: https://raw.githubusercontent.com/cloud-barista/cb-spider/refs/heads/master/api/swagger.yaml
+    swagger: https://raw.githubusercontent.com/cloud-barista/cb-spider/v0.13.2/api/swagger.yaml
 
   # MC-Data-Manager - Data Management
   # Note: No releases found - using main branch
