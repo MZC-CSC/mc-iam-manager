@@ -267,16 +267,18 @@ Seed and runtime role-menu mapping for the platform console.
 
 ### Seed files (`asset/menu/`)
 
-- `menu.yaml` — menu tree (ids, parents, paths, menu resources). This is a **local cache**, not the source of truth: `MC_WEB_CONSOLE_MENUYAML` normally points at mc-web-console's `conf/webconsole_menu_resources.yaml` (raw GitHub URL) — that file is the platform-wide canonical menu catalog, and `initial-menus`/`initial-menus2` download/accept it and overwrite this local copy as a side effect.
-- `permission.yaml` — role-centric seed: `permissions → role → menus | operations | csps` (`operations` / `csps` reserved)
+- `menu.yaml` — menu tree (ids, parents, paths, menu resources). This is a **fallback / download cache**, not the source of truth: the platform-wide canonical menu catalog is mc-web-console's `conf/webconsole_menu_resources.yaml`. In an mc-admin-cli deployment a copy of that file is mounted into this container and `MC_WEB_CONSOLE_MENUYAML` points at the mounted path; when the env holds a URL instead, `initial-menus` downloads it and overwrites this local copy as a side effect.
+- `permission.yaml` — role-centric seed: `permissions → role → menus | operations | csps` (`operations` / `csps` reserved). Menu ids it references must exist in the DB; unknown ids are skipped and reported (`missingPermissionMenuIDs`).
 - `MC_WEB_CONSOLE_MENU_PERMISSIONS` — path or YAML URL to the permission seed (samples default to `asset/menu/permission.yaml`). Extension must be `.yaml` / `.yml`. The old CSV URL is no longer the seed source.
-- `MC_WEB_CONSOLE_MENUYAML` (optional) — remote menu tree YAML URL
+- `MC_WEB_CONSOLE_MENUYAML` (optional) — menu tree YAML: a local path (read as-is, relative to the working directory) or a remote URL
 
-### Initial / re-seed APIs (Platform Admin Bearer)
+### Seed once, then edit the DB
 
-- `POST /api/setup/initial-menus` — (re-)download `MC_WEB_CONSOLE_MENUYAML` (or local `filePath`) and load `menu.yaml`
-- `POST /api/setup/initial-menus2` — same registration, but accepts the menu YAML directly as the request body (no download step) — useful for registering unmerged/local changes before they land on the URL `initial-menus` fetches
-- `GET /api/setup/initial-role-menu-permission-yaml` — seed from `permission.yaml` (also runs inside `POST /api/initial-admin`)
+Menus and role-menu mappings are seeded from yaml **once, at first install**. After that the DB is the source of truth — change menus via `/api/menus` (or the console's Menus screen) and mappings via `/api/menus/platform-roles`. Re-running the seed does not overwrite those edits:
+
+- `POST /api/setup/initial-menus` — seeds from `MC_WEB_CONSOLE_MENUYAML` (or local `filePath`). If the DB already has menus (other than `home`) the call **skips** and returns `200 {skipped: true, existingMenuCount}`, so re-running the install scripts is idempotent. Pass `?force=true` to overwrite from yaml anyway; the current role-menu mappings are saved to `asset/menu/backups/` first (`backupPath` in the response). Chains into the permission seed; response also carries `permissionsWarning`, `orphanMenusDetected` (DB ids absent from the yaml — not deleted) and `missingPermissionMenuIDs`.
+- `POST /api/setup/initial-menus2` — same guard/force semantics, but accepts the menu YAML directly as the request body (no download step, no permission chaining) — useful for trying unmerged/local changes.
+- `GET /api/setup/initial-role-menu-permission-yaml` — seed mappings from `permission.yaml` (also runs inside `POST /api/initial-admin`). **Additive**: existing mappings are kept, but any mapping removed at runtime that is still in the yaml comes back. Reports `missingPermissionMenuIDs`.
 - `GET /api/setup/initial-role-menu-permission` — **Removed**; this CSV route no longer exists. Use `initial-role-menu-permission-yaml`
 - Setup scripts (`conf/mc-iam-manager/1_setup_auto.sh`): after menus, Step 4-1 calls the YAML seed without `filePath` (server resolves env / local asset)
 
