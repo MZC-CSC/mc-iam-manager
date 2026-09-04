@@ -130,7 +130,10 @@ func (s *MenuService) GetAllMenusTree(req *model.MenuFilterRequest) ([]*model.Me
 
 // BuildUserMenuTree 사용자의 플랫폼 역할에 따른 메뉴 트리 구성
 func (s *MenuService) BuildUserMenuTree(ctx context.Context, platformRoleIDs []uint) ([]*model.MenuTreeNode, error) {
-	req := &model.MenuMappingFilterRequest{}
+	req := &model.MenuMappingFilterRequest{RoleIDs: make([]string, 0, len(platformRoleIDs))}
+	for _, roleID := range platformRoleIDs {
+		req.RoleIDs = append(req.RoleIDs, strconv.FormatUint(uint64(roleID), 10))
+	}
 	var allMenus []*model.Menu
 
 	// 1. 각 플랫폼 역할에 매핑된 메뉴 ID들을 조회
