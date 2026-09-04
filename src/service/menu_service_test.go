@@ -75,6 +75,9 @@ func writeTempFile(t *testing.T, name, content string) string {
 func TestLoadAndRegisterMenusFromYAML_ChainsPermissionSeed_Success(t *testing.T) {
 	db := setupMenuServiceTestDB(t)
 	seedAdminPlatformRole(t, db)
+	// home은 upsert 대상이 아니라 UpdateMenu만 되므로 매핑 대상이 되려면 선존재해야 한다
+	// (DB에 없는 메뉴 id는 매핑을 만들지 않고 missing으로 보고된다)
+	require.NoError(t, db.Create(&model.Menu{ID: "home", DisplayName: "Home", ResType: "menu"}).Error)
 
 	permPath := writeTempFile(t, "permission.yaml", testPermissionYAML)
 	t.Setenv("MC_WEB_CONSOLE_MENU_PERMISSIONS", permPath)
@@ -82,9 +85,10 @@ func TestLoadAndRegisterMenusFromYAML_ChainsPermissionSeed_Success(t *testing.T)
 	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML)
 
 	s := NewMenuService(db)
-	warning, _, err := s.LoadAndRegisterMenusFromYAML(menuPath)
+	result, err := s.LoadAndRegisterMenusFromYAML(menuPath, false)
 	require.NoError(t, err)
-	require.Empty(t, warning, "permission seed succeeded, so no warning should be returned")
+	require.False(t, result.Skipped)
+	require.Empty(t, result.PermissionsWarning, "permission seed succeeded, so no warning should be returned")
 
 	var mapping model.RoleMenuMapping
 	require.NoError(t, db.Where("menu_id = ?", "home").First(&mapping).Error)
@@ -101,9 +105,9 @@ func TestLoadAndRegisterMenusFromYAML_PermissionSeedMissing_ReturnsWarningNotErr
 	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML)
 
 	s := NewMenuService(db)
-	warning, _, err := s.LoadAndRegisterMenusFromYAML(menuPath)
+	result, err := s.LoadAndRegisterMenusFromYAML(menuPath, false)
 	require.NoError(t, err, "permission seed failure must not fail menu registration")
-	require.NotEmpty(t, warning, "permission seed failure should surface as a warning")
+	require.NotEmpty(t, result.PermissionsWarning, "permission seed failure should surface as a warning")
 
 	var mappingCount int64
 	require.NoError(t, db.Model(&model.RoleMenuMapping{}).Count(&mappingCount).Error)
@@ -123,10 +127,12 @@ func TestLoadAndRegisterMenusFromYAML_DetectsOrphanMenus_WithoutDeleting(t *test
 
 	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML) // home만 포함, removed-from-yaml 없음
 
+	// 메뉴가 이미 있으므로 가드를 넘기려면 force가 필요하다 (백업 파일은 임시 cwd에 쓴다)
+	chdirTemp(t)
 	s := NewMenuService(db)
-	_, orphanMenus, err := s.LoadAndRegisterMenusFromYAML(menuPath)
+	result, err := s.LoadAndRegisterMenusFromYAML(menuPath, true)
 	require.NoError(t, err)
-	require.Contains(t, orphanMenus, "removed-from-yaml", "yaml에서 빠진 기존 메뉴 id가 감지되어야 한다")
+	require.Contains(t, result.OrphanMenuIDs, "removed-from-yaml", "yaml에서 빠진 기존 메뉴 id가 감지되어야 한다")
 
 	// 감지만 하고 삭제는 하지 않아야 한다 — 재조회로 DB에 그대로 남아있는지 확인
 	var stillExists model.Menu
@@ -145,7 +151,127 @@ func TestLoadAndRegisterMenusFromYAML_NoOrphans_WhenYamlCoversAllExistingMenus(t
 	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML)
 
 	s := NewMenuService(db)
-	_, orphanMenus, err := s.LoadAndRegisterMenusFromYAML(menuPath)
+	result, err := s.LoadAndRegisterMenusFromYAML(menuPath, false)
 	require.NoError(t, err)
-	require.Empty(t, orphanMenus, "yaml이 기존 DB 메뉴를 모두 포함하면 orphan이 없어야 한다")
+	require.False(t, result.Skipped, "home만 있는 DB는 '시딩됨'으로 보지 않아야 한다")
+	require.Empty(t, result.OrphanMenuIDs, "yaml이 기존 DB 메뉴를 모두 포함하면 orphan이 없어야 한다")
+}
+
+// chdirTemp는 force 재시딩 시 SaveRolePermissionBackupFile이 cwd 기준 asset/menu/backups/에
+// 쓰는 백업 파일이 저장소를 오염시키지 않도록 임시 디렉토리로 이동한다.
+func chdirTemp(t *testing.T) string {
+	t.Helper()
+	orig, err := os.Getwd()
+	require.NoError(t, err)
+	dir := t.TempDir()
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	return dir
+}
+
+// 최초 1회 가드: DB에 (home 외) 메뉴가 이미 있으면 force=false 호출은 아무것도 바꾸지 않고
+// Skipped를 돌려줘야 한다 — 체이닝되는 권한 시딩도 실행되지 않는다.
+func TestLoadAndRegisterMenusFromYAML_SkipsWhenMenusExist_WithoutForce(t *testing.T) {
+	db := setupMenuServiceTestDB(t)
+	seedAdminPlatformRole(t, db)
+	require.NoError(t, db.Create(&model.Menu{ID: "users", DisplayName: "Edited In DB", ResType: "menu"}).Error)
+
+	permPath := writeTempFile(t, "permission.yaml", testPermissionYAML)
+	t.Setenv("MC_WEB_CONSOLE_MENU_PERMISSIONS", permPath)
+	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML)
+
+	s := NewMenuService(db)
+	result, err := s.LoadAndRegisterMenusFromYAML(menuPath, false)
+	require.NoError(t, err)
+	require.True(t, result.Skipped)
+	require.Equal(t, 1, result.ExistingMenuCount)
+	require.Zero(t, result.RegisteredCount)
+
+	var mappingCount int64
+	require.NoError(t, db.Model(&model.RoleMenuMapping{}).Count(&mappingCount).Error)
+	require.Zero(t, mappingCount, "skip 시 권한 시딩도 실행되면 안 된다")
+
+	var menu model.Menu
+	require.NoError(t, db.Where("id = ?", "users").First(&menu).Error)
+	require.Equal(t, "Edited In DB", menu.DisplayName, "skip 시 DB 편집이 유지되어야 한다")
+}
+
+// force=true면 가드를 넘어 시딩이 진행되고, 그 전에 역할 권한 백업 파일이 저장되어야 한다.
+func TestLoadAndRegisterMenusFromYAML_ForceOverridesGuard_WithBackup(t *testing.T) {
+	db := setupMenuServiceTestDB(t)
+	seedAdminPlatformRole(t, db)
+	require.NoError(t, db.Create(&model.Menu{ID: "users", DisplayName: "Users", ResType: "menu"}).Error)
+
+	permPath := writeTempFile(t, "permission.yaml", testPermissionYAML)
+	t.Setenv("MC_WEB_CONSOLE_MENU_PERMISSIONS", permPath)
+	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML)
+
+	tmp := chdirTemp(t)
+	s := NewMenuService(db)
+	result, err := s.LoadAndRegisterMenusFromYAML(menuPath, true)
+	require.NoError(t, err)
+	require.False(t, result.Skipped)
+	require.Equal(t, 1, result.ExistingMenuCount)
+	require.Empty(t, result.BackupWarning)
+	require.NotEmpty(t, result.BackupPath)
+	require.FileExists(t, filepath.Join(tmp, result.BackupPath))
+	require.Contains(t, result.OrphanMenuIDs, "users")
+}
+
+// 빈 DB에서는 force 없이도 시딩되고 백업은 만들지 않는다 (최초 설치 경로).
+func TestLoadAndRegisterMenusFromYAML_FreshDB_SeedsWithoutBackup(t *testing.T) {
+	db := setupMenuServiceTestDB(t)
+	seedAdminPlatformRole(t, db)
+	permPath := writeTempFile(t, "permission.yaml", testPermissionYAML)
+	t.Setenv("MC_WEB_CONSOLE_MENU_PERMISSIONS", permPath)
+	menuPath := writeTempFile(t, "menu.yaml", testMenuYAML)
+
+	s := NewMenuService(db)
+	result, err := s.LoadAndRegisterMenusFromYAML(menuPath, false)
+	require.NoError(t, err)
+	require.False(t, result.Skipped)
+	require.Zero(t, result.ExistingMenuCount)
+	require.Equal(t, 1, result.RegisteredCount)
+	require.Empty(t, result.BackupPath)
+}
+
+// initial-menus2(본문 시딩)에도 동일한 가드가 적용된다. 잘못된 yaml은 가드보다 먼저 거부된다.
+func TestRegisterMenusFromContent_GuardAndParseOrder(t *testing.T) {
+	db := setupMenuServiceTestDB(t)
+	require.NoError(t, db.Create(&model.Menu{ID: "users", DisplayName: "Users", ResType: "menu"}).Error)
+
+	s := NewMenuService(db)
+	result, err := s.RegisterMenusFromContent([]byte(testMenuYAML), false)
+	require.NoError(t, err)
+	require.True(t, result.Skipped)
+
+	_, err = s.RegisterMenusFromContent([]byte("menus: [not: [valid"), false)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "error unmarshalling")
+}
+
+// permission.yaml이 DB에 없는 메뉴 id를 참조하면 해당 매핑은 만들지 않고 목록으로 보고한다.
+func TestInitializeMenuPermissionsFromYAML_ReportsMissingMenuIDs(t *testing.T) {
+	db := setupMenuServiceTestDB(t)
+	seedAdminPlatformRole(t, db)
+	require.NoError(t, db.Create(&model.Menu{ID: "home", DisplayName: "Home", ResType: "menu"}).Error)
+
+	permPath := writeTempFile(t, "permission.yaml", `
+permissions:
+  - role: admin
+    menus:
+      - home
+      - ghost-menu
+      - another-ghost
+`)
+
+	s := NewMenuService(db)
+	missing, err := s.InitializeMenuPermissionsFromYAML(permPath)
+	require.NoError(t, err)
+	require.Equal(t, []string{"another-ghost", "ghost-menu"}, missing)
+
+	var mappings []model.RoleMenuMapping
+	require.NoError(t, db.Find(&mappings).Error)
+	require.Len(t, mappings, 1)
+	require.Equal(t, "home", mappings[0].MenuID)
 }
