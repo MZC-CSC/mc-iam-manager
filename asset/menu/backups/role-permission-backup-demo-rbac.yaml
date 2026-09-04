@@ -8,8 +8,10 @@
 # additive라 재실행해도 안전(이미 매핑된 항목은 건너뜀).
 #
 # 설계 근거: mcmp-qa/registry/iam-assets/ROLE-TEAM-USER-DEMO-DESIGN.md "1. 역할" 표.
+# 메뉴 id는 mc-web-console conf/webconsole_menu_resources.yaml (develop 3a015768) 기준.
+# 모듈 화면은 컨테이너 메뉴 + 하위 항목을 함께 매핑해야 사이드바에 노출된다.
 kind: role-permission-backup
-backupAt: "2026-08-22T00:00:00Z"
+backupAt: "2026-09-04T00:00:00Z"
 source: demo-rbac-setup
 sections:
   - permissions
@@ -22,6 +24,8 @@ permissions:
       - infraworkloads
       - k8sworkloads
       - workflows
+      - mcworkflows
+      - mceventlistener
     operations: []
     csps: []
 
@@ -33,6 +37,8 @@ permissions:
       - infraworkloads
       - k8sworkloads
       - workflows
+      - mcworkflows
+      - mceventlistener
     operations: []
     csps: []
 
@@ -44,6 +50,8 @@ permissions:
       - infraworkloads
       - k8sworkloads
       - workflows
+      - mcworkflows
+      - mceventlistener
     operations: []
     csps: []
 
@@ -54,7 +62,10 @@ permissions:
       - workloads
       - infraworkloads
       - k8sworkloads
+      - applications
       - swcatalogs
+      - appstatus
+      - apprepository
     operations: []
     csps: []
 
@@ -65,7 +76,10 @@ permissions:
       - workloads
       - infraworkloads
       - k8sworkloads
+      - applications
       - swcatalogs
+      - appstatus
+      - apprepository
     operations: []
     csps: []
 
@@ -76,7 +90,10 @@ permissions:
       - workloads
       - infraworkloads
       - k8sworkloads
+      - applications
       - swcatalogs
+      - appstatus
+      - apprepository
     operations: []
     csps: []
 
@@ -87,7 +104,12 @@ permissions:
       - workloads
       - infraworkloads
       - k8sworkloads
-      - datamigrations
+      - mcdatamanager
+      - mcdatagenerate
+      - mcdatamigration
+      - mcdatabackup
+      - mcdatarestore
+      - mcdatalogmanager
     operations: []
     csps: []
 
@@ -98,7 +120,12 @@ permissions:
       - workloads
       - infraworkloads
       - k8sworkloads
-      - datamigrations
+      - mcdatamanager
+      - mcdatagenerate
+      - mcdatamigration
+      - mcdatabackup
+      - mcdatarestore
+      - mcdatalogmanager
     operations: []
     csps: []
 
@@ -109,7 +136,12 @@ permissions:
       - workloads
       - infraworkloads
       - k8sworkloads
-      - datamigrations
+      - mcdatamanager
+      - mcdatagenerate
+      - mcdatamigration
+      - mcdatabackup
+      - mcdatarestore
+      - mcdatalogmanager
     operations: []
     csps: []
 
@@ -122,6 +154,10 @@ permissions:
       - k8sworkloads
       - analytics
       - costanalysis
+      - costdashboard
+      - billingreport
+      - costalarm
+      - budget
     operations: []
     csps: []
 
@@ -133,7 +169,13 @@ permissions:
       - infraworkloads
       - k8sworkloads
       - analytics
-      - observability
+      - mcobservability
+      - mco11ymonitorings
+      - mc011ylogs
+      - mc011yconfig
+      - mc011yinsight
+      - mc011yalerts
+      - mc011ytracing
     operations: []
     csps: []
 
@@ -145,7 +187,13 @@ permissions:
       - infraworkloads
       - k8sworkloads
       - analytics
-      - observability
+      - mcobservability
+      - mco11ymonitorings
+      - mc011ylogs
+      - mc011yconfig
+      - mc011yinsight
+      - mc011yalerts
+      - mc011ytracing
     operations: []
     csps: []
 
@@ -157,6 +205,12 @@ permissions:
       - infraworkloads
       - k8sworkloads
       - analytics
-      - observability
+      - mcobservability
+      - mco11ymonitorings
+      - mc011ylogs
+      - mc011yconfig
+      - mc011yinsight
+      - mc011yalerts
+      - mc011ytracing
     operations: []
     csps: []
