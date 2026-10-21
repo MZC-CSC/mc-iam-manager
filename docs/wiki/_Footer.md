@@ -1,0 +1,1 @@
+[mc-iam-manager](https://github.com/m-cmp/mc-iam-manager) · [Issues](https://github.com/m-cmp/mc-iam-manager/issues) · Wiki sources live in [`docs/wiki/`](https://github.com/m-cmp/mc-iam-manager/tree/main/docs/wiki) — edit there, not in the wiki UI.
