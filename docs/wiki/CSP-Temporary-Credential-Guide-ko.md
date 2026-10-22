@@ -19,15 +19,20 @@ flowchart LR
 
 AWS 쪽은 **최초 1회만** 사람이 설정합니다. 이때 만드는 **관리용 Role**(예: `mciam-admin`)로 mc-iam-manager가 사용자용 Role을 AWS에 직접 만듭니다.
 
-| 단계 | 어디서 (브라우저) | 작업 | 빈도 | 담당 |
+| 단계 | 수행 위치 | 작업 | 빈도 | 담당 |
 |---|---|---|---|---|
-| 1 | Keycloak Admin Console, 서버 | 사전 점검: OIDC 클라이언트, 환경변수 | 환경마다 1회 | 시스템 관리자 |
-| 2 | AWS IAM 콘솔 | Keycloak을 OIDC Provider로 등록 | 환경마다 1회 | AWS 관리자 |
-| 3 | AWS IAM 콘솔 | 관리용 Role 준비 (없으면 생성, 있으면 신뢰 관계에 새 환경 추가) | 환경마다 1회 | AWS 관리자 |
-| 4 | mc-web-console, 개발자 도구 | CSP Account, IdP Config 등록 | 환경마다 1회 | 플랫폼 관리자 |
-| 5 | mc-web-console, AWS IAM 콘솔 | 사용자용 CSP Role 등록(→ AWS에 자동 생성), 권한 정책 부여 | 역할마다 | 플랫폼 관리자 |
-| 6 | mc-web-console | 역할 ↔ CSP Role 매핑, 사용자에게 워크스페이스 역할 할당 | 필요할 때 | 플랫폼 관리자 |
-| 7 | 개발자 도구, AWS CloudShell | 임시자격증명 발급·검증 | 필요할 때 | 사용자 / 관리자 |
+| 1-1 | **Keycloak Admin Console** | `<OIDC_CLIENT>` 클라이언트가 있는지 확인, 없으면 추가 | 환경마다 1회 | 시스템 관리자 |
+| 1-2 | **서버(VM)**: mc-iam-manager가 실행되는 호스트 | 환경변수 설정, 컨테이너 재생성 | 환경마다 1회 | 시스템 관리자 |
+| 2 | **Provider(AWS) 콘솔** | 해당 환경의 OIDC Provider 생성 | 환경마다 1회 | AWS 관리자 |
+| 3-1 | **Provider(AWS) 콘솔** | 관리용 Role(`<ADMIN_ROLE>`)이 있는지 확인 | 환경마다 1회 | AWS 관리자 |
+| 3-2 | **Provider(AWS) 콘솔** | 없으면 관리용 Role 생성 | 계정마다 1회 | AWS 관리자 |
+| 3-3 | **Provider(AWS) 콘솔** | 있으면 관리용 Role 신뢰 관계에 해당 환경 문장 추가 | 환경마다 1회 | AWS 관리자 |
+| 4 | **mc-web-console**, **브라우저 개발자 도구** | CSP Account, IdP Config 등록 | 환경마다 1회 | 플랫폼 관리자 |
+| 5 | **mc-web-console**, **Provider(AWS) 콘솔** | 사용자용 CSP Role 등록(→ AWS에 자동 생성), 권한 정책 부여 | 역할마다 | 플랫폼 관리자 |
+| 6 | **mc-web-console** | 역할 ↔ CSP Role 매핑, 사용자에게 워크스페이스 역할 할당 | 필요할 때 | 플랫폼 관리자 |
+| 7 | **브라우저 개발자 도구**, **Provider(AWS) CloudShell** | 임시자격증명 발급·검증 | 필요할 때 | 사용자 / 관리자 |
+
+"환경"은 Keycloak issuer 하나(예: dev, stage, prod 서버 각각)를 말합니다. 서버(VM) 작업만 SSH가 필요하고 나머지는 모두 브라우저에서 합니다.
 
 ### 표기
 
@@ -74,6 +79,8 @@ var TOKEN = await login();   // 플랫폼 관리자 계정
 ## 1. 사전 점검
 
 ### 1-1. Keycloak OIDC 클라이언트
+
+> **수행 위치: Keycloak Admin Console** (`https://<KC_DOMAIN>/auth/admin/`)
 
 mc-iam-manager는 발급할 때 이 클라이언트의 서비스 계정 토큰을 CSP에 제출합니다.
 
@@ -130,9 +137,11 @@ console.log(kc.error ?? { access: (({iss, azp, aud}) => ({iss, azp, aud}))(jwt(k
 
 정상이면 `iss`가 `<ISSUER>`, access token의 `azp`와 id token의 `aud`가 `<OIDC_CLIENT>`입니다(access token의 `aud`가 `account`인 것은 정상). `iss`가 `http://mc-iam-manager-kc:8080/...` 같은 내부 주소면 Keycloak 컨테이너에 `KC_HOSTNAME_URL=https://<KC_DOMAIN>/auth`가 설정됐는지 확인하세요.
 
-### 1-2. mc-iam-manager 환경변수 (서버)
+### 1-2. mc-iam-manager 환경변수
 
-5단계에서 mc-iam-manager가 AWS에 사용자용 Role을 만들 때 신뢰 정책을 아래 값으로 조립합니다. 샘플 기본값(`notyet`, 빈 값) 그대로면 Role 생성이 실패하거나 **동작하지 않는 Role이 만들어집니다.** 서버 `.env`에서 설정하고 mc-iam-manager 컨테이너를 재생성합니다.
+> **수행 위치: 서버(VM)**: mc-iam-manager 컨테이너가 실행되는 호스트에 SSH로 접속해서 합니다. 브라우저로는 할 수 없습니다.
+
+5단계에서 mc-iam-manager가 AWS에 사용자용 Role을 만들 때 신뢰 정책을 아래 값으로 조립합니다. 샘플 기본값(`notyet`, 빈 값) 그대로면 Role 생성이 실패하거나 **동작하지 않는 Role이 만들어집니다.**
 
 | 변수 | 값 | 비우거나 틀리면 |
 |---|---|---|
@@ -142,11 +151,25 @@ console.log(kc.error ?? { access: (({iss, azp, aud}) => ({iss, azp, aud}))(jwt(k
 | `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_SECRET` | 1-1 클라이언트의 secret | `401 invalid_client` |
 | `SAML_CLIENT_ID_AWS` | SAML을 쓸 때만. 보통 `urn:amazon:webservices` | |
 
+**mc-admin-cli로 설치한 서버**에서는:
+
+1. 수정할 파일: `<mc-admin-cli 경로>/conf/docker/conf/mc-iam-manager/.env`
+   - mc-iam-manager 컨테이너는 이 파일을 `env_file`로 읽습니다. 같은 이름의 값이 `conf/docker/.env`에도 있지만 그 파일은 compose 변수 치환용이라 **컨테이너에는 들어가지 않습니다.**
+2. 반영: `conf/docker` 폴더에서 컨테이너를 **재생성**합니다. `docker restart`로는 env 파일이 다시 읽히지 않습니다. 재생성하는 30초 남짓 동안 로그인·API가 끊깁니다.
+
+```bash
+cd <mc-admin-cli 경로>/conf/docker
+docker compose -p mcc up -d --no-deps --force-recreate mc-iam-manager   # -p 는 기존 compose 프로젝트명
+docker exec mc-iam-manager env | grep -E 'KEYCLOAK_(EXTERNAL_URL|OIDC_CLIENT_ID)|AWS_ACCOUNT_ID'   # 반영 확인
+```
+
+compose 프로젝트명은 `docker inspect mc-iam-manager --format '{{index .Config.Labels "com.docker.compose.project"}}'`로 확인합니다.
+
 ---
 
-## 2. AWS: Keycloak을 OIDC Provider로 등록 (환경마다 1회)
+## 2. AWS: 해당 환경의 OIDC Provider 생성 (환경마다 1회)
 
-AWS 콘솔(IAM 관리 권한이 있는 계정) → **IAM** → 왼쪽 **Identity providers**
+> **수행 위치: Provider(AWS) 콘솔**: IAM 관리 권한이 있는 계정으로 로그인 → **IAM** → 왼쪽 **Identity providers**
 
 1. 목록에서 Provider 이름이 `<KC_DOMAIN>/auth/realms/<REALM>`인 항목이 있는지 찾습니다.
    - **있으면** 클릭 → **Audiences**에 `<OIDC_CLIENT>`가 있는지 확인합니다. 없으면 Actions → **Add audience**로 추가하고 3단계로 갑니다.
@@ -180,11 +203,28 @@ aws iam create-open-id-connect-provider --url "https://${ISSUER_HOSTPATH}" --cli
 
 ## 3. AWS: 관리용 Role 준비 (환경마다 1회)
 
-관리용 Role은 `role/mciam-*` Role을 만들고 고칠 권한을 갖고, mc-iam-manager가 이 Role로 사용자용 Role을 만듭니다. **계정에 관리용 Role이 이미 있으면 새로 만들지 말고 신뢰 관계에 새 환경만 추가합니다(경우 B).**
+> **수행 위치: Provider(AWS) 콘솔** → **IAM** → 왼쪽 **Roles**
 
-IAM → **Roles** → 검색창에 `<ADMIN_ROLE>` 입력.
+관리용 Role은 `role/mciam-*` Role을 만들고 고칠 권한을 갖고, mc-iam-manager가 이 Role로 사용자용 Role을 만듭니다. AWS 계정마다 하나를 두고 여러 환경이 함께 씁니다.
 
-### 경우 A. 관리용 Role이 없을 때 (해당 AWS 계정에서 처음 연동)
+### 3-1. 관리용 Role이 있는지 확인
+
+Roles 검색창에 `<ADMIN_ROLE>` 입력.
+
+- **없으면** → 3-2 (생성하면 이 환경의 신뢰 관계까지 함께 들어가므로 3-3은 건너뜁니다)
+- **있으면** → Role 클릭 → **Trust relationships** 탭에서 2단계의 `<PROVIDER_ARN>` 문장이 있는지 봅니다. 있으면 3단계 완료, 없으면 3-3
+
+<details>
+<summary>CLI로 할 때</summary>
+
+```bash
+aws iam get-role --role-name "<ADMIN_ROLE>" --query 'Role.AssumeRolePolicyDocument.Statement[].Principal.Federated'
+# NoSuchEntity 오류면 Role 없음
+```
+
+</details>
+
+### 3-2. 없으면 관리용 Role 생성
 
 1. **Create role**
 2. Trusted entity type: **Web identity** → Identity provider: `<KC_DOMAIN>/auth/realms/<REALM>` → Audience: `<OIDC_CLIENT>` → Next
@@ -217,7 +257,7 @@ IAM → **Roles** → 검색창에 `<ADMIN_ROLE>` 입력.
 
 권한 범위를 `role/mciam-*`로 묶어 두면 mc-iam-manager는 그 밖의 Role을 건드릴 수 없습니다.
 
-### 경우 B. 관리용 Role이 이미 있을 때 (새 환경 추가)
+### 3-3. 있으면 신뢰 관계에 해당 환경 문장 추가
 
 1. `<ADMIN_ROLE>` 클릭 → **Trust relationships** 탭
 2. 기존 정책 JSON 전체를 복사해 따로 보관합니다(되돌릴 때 사용).
@@ -242,10 +282,10 @@ IAM → **Roles** → 검색창에 `<ADMIN_ROLE>` 입력.
 
 > **기존 문장은 절대 지우지 마세요.** 다른 환경(다른 Keycloak)이 같은 관리용 Role을 쓰고 있어서, 문장을 지우면 그 환경의 Role 생성이 모두 멈춥니다. 저장 전에 편집기에서 문장 수가 "기존 + 1"인지 확인합니다.
 
-5. **Permissions** 탭에서 inline 정책이 경우 A의 5번 내용을 포함하는지 확인합니다.
+5. **Permissions** 탭에서 inline 정책이 3-2의 5번 내용을 포함하는지 확인합니다.
 
 <details>
-<summary>CLI로 할 때 (경우 B, 기존 문장을 유지하며 추가)</summary>
+<summary>CLI로 할 때 (기존 문장을 유지하며 추가)</summary>
 
 ```bash
 export ADMIN_ROLE="<관리용 Role 이름>"   # 2단계 CLI의 변수도 함께 설정
@@ -264,11 +304,13 @@ aws iam update-assume-role-policy --role-name "$ADMIN_ROLE" --policy-document fi
 
 </details>
 
-**확인**: Trust relationships 탭에 `<PROVIDER_ARN>`과 `aud`=`<OIDC_CLIENT>` 문장이 보이면 됩니다. 실제로 assume되는지는 [체크리스트 B3](#b-csp-aws-기준)에서 확인합니다.
+**확인**: Trust relationships 탭에 `<PROVIDER_ARN>`과 `aud`=`<OIDC_CLIENT>` 문장이 보이면 됩니다. 실제로 assume되는지는 [체크리스트 B3](#9-점검-체크리스트)에서 확인합니다.
 
 ---
 
 ## 4. mc-iam-manager: CSP Account, IdP Config 등록 (환경마다 1회)
+
+> **수행 위치: mc-web-console**(4-1), **브라우저 개발자 도구**(4-2, [사용법](#개발자-도구에서-api-호출하기))
 
 ### 4-1. CSP Account
 
@@ -310,6 +352,8 @@ await api('POST', '/api/csp-idp-configs', {
 
 ## 5. 사용자용 CSP Role 등록 (역할마다)
 
+> **수행 위치: mc-web-console**(5-1), **Provider(AWS) 콘솔**(5-2), **브라우저 개발자 도구**(5-3)
+
 ### 5-1. mc-web-console에서 등록 → AWS에 Role 자동 생성
 
 mc-web-console → **Operations > Manage > Workspaces > CSP Roles** → Add CSP Role
@@ -335,7 +379,7 @@ mc-web-console → **Operations > Manage > Workspaces > CSP Roles** → Add CSP 
 
 AWS IAM → Roles → `mciam-<이름>` → **Permissions** → Add permissions → **Attach policies** → 필요한 정책 선택(예: `AmazonEC2ReadOnlyAccess`) → Add permissions.
 
-**Trust relationships** 탭에서 자동 생성된 신뢰 정책이 `<PROVIDER_ARN>`과 `aud`=`<OIDC_CLIENT>`인지도 확인합니다. Provider가 `mc-iam-manager-kc...` 같은 내부 주소거나 `aud`가 `notyet`이면 1-2 환경변수가 잘못된 것입니다. 이 경우 환경변수를 고친 뒤 Role의 신뢰 정책을 3단계 경우 B의 문장으로 바꿉니다.
+**Trust relationships** 탭에서 자동 생성된 신뢰 정책이 `<PROVIDER_ARN>`과 `aud`=`<OIDC_CLIENT>`인지도 확인합니다. Provider가 `mc-iam-manager-kc...` 같은 내부 주소거나 `aud`가 `notyet`이면 1-2 환경변수가 잘못된 것입니다. 이 경우 환경변수를 고친 뒤 Role의 신뢰 정책을 3-3의 문장으로 바꿉니다.
 
 ### 5-3. 화면에서 입력할 수 없는 값
 
@@ -349,6 +393,8 @@ await api('PUT', '/api/roles/csp/id/<CSP_ROLE_ID>', { cspIdpConfigId: <IDP_CONFI
 ---
 
 ## 6. 역할 매핑과 사용자 할당
+
+> **수행 위치: mc-web-console**
 
 ### 6-1. 역할 ↔ CSP Role 매핑
 
@@ -367,6 +413,8 @@ mc-web-console → **Operations > Manage > Workspaces** → 워크스페이스 �
 ---
 
 ## 7. 발급과 검증
+
+> **수행 위치: 브라우저 개발자 도구**(7-1, 7-3), **Provider(AWS) CloudShell**(7-2)
 
 ### 7-1. 발급 (개발자 도구)
 
@@ -435,8 +483,8 @@ await api('POST', '/api/workspaces/credentials/validate', { workspaceId: '<WORKS
 | `Role ARN이 설정되지 않았습니다` | CSP Role의 IAM Identifier가 비어 있음 | CSP Roles → Edit에서 Role ARN 입력 |
 | `no active AWS OIDC IDP config found` (CSP Role 등록 시) | AWS 계정에 활성 OIDC IdP Config가 없음 | 4-2 등록, 비활성이면 `api('POST','/api/csp-idp-configs/id/<id>/activate')` |
 | `role_arn not configured in active AWS OIDC IDP config` | IdP Config의 `config.role_arn` 누락 | 관리용 Role ARN을 `config.role_arn`에 추가 |
-| `failed to assume role with web identity` (CSP Role 등록 시) | 관리용 Role 신뢰 관계에 이 환경이 없음 | 3단계 경우 B |
-| `AccessDenied ... iam:CreateRole` (CSP Role 등록 시) | 관리용 Role 권한 부족 또는 Role 이름이 `mciam-`로 시작하지 않음 | 3단계 경우 A의 5번 정책 확인 |
+| `failed to assume role with web identity` (CSP Role 등록 시) | 관리용 Role 신뢰 관계에 이 환경이 없음 | 3-3 |
+| `AccessDenied ... iam:CreateRole` (CSP Role 등록 시) | 관리용 Role 권한 부족 또는 Role 이름이 `mciam-`로 시작하지 않음 | 3-2의 5번 정책 확인 |
 | `MC_IAM_MANAGER_AWS_ACCOUNT_ID environment variable is not set` | 환경변수 미설정 | 1-2 설정 후 재기동 |
 | Keycloak `401 invalid_client` | OIDC 클라이언트가 없거나 secret 불일치 | 1-1 |
 | AWS `InvalidIdentityToken` / `Not authorized to perform sts:AssumeRoleWithWebIdentity` (발급 시) | 사용자용 Role 신뢰 정책의 Provider·`aud`가 틀림, 또는 Provider Audience에 `<OIDC_CLIENT>` 없음 | 5-2의 신뢰 정책 확인, 2단계 Audiences 확인 |
@@ -502,7 +550,7 @@ GCP SAML은 Keycloak SAML 클라이언트 ID가 **WIF Provider 리소스 경로�
 
 새 환경을 구성할 때, 또는 발급이 실패해 원인을 좁힐 때 위에서부터 차례로 확인합니다. 앞 항목이 실패하면 뒤 항목은 볼 필요가 없습니다. **B3**은 mc-iam-manager를 거치지 않고 Keycloak 토큰으로 AWS를 직접 호출하므로, 문제가 Keycloak·AWS 쪽인지 mc-iam-manager 쪽인지 가르는 기준점입니다.
 
-### A. Keycloak·서버
+### A. Keycloak·서버 (Keycloak Admin Console, 브라우저 개발자 도구, 서버 VM)
 
 | ID | 점검 항목 | 확인 방법 (브라우저) | 기대 결과 |
 |---|---|---|---|
@@ -513,7 +561,7 @@ GCP SAML은 Keycloak SAML 클라이언트 ID가 **WIF Provider 리소스 경로�
 | A5 | 환경변수 (서버) | `docker exec mc-iam-manager env \| grep -E 'KEYCLOAK_(EXTERNAL_URL\|OIDC_CLIENT_ID)\|AWS_ACCOUNT_ID'` | 1-2 표의 값. `notyet`이나 빈 값이 없음 |
 | A6 | (SAML) Keycloak 설정 | 8-3의 1~4 | 모두 충족 |
 
-### B. AWS
+### B. AWS (Provider(AWS) 콘솔, CloudShell)
 
 | ID | 점검 항목 | 확인 방법 (AWS 콘솔) | 기대 결과 |
 |---|---|---|---|
@@ -522,7 +570,7 @@ GCP SAML은 Keycloak SAML 클라이언트 ID가 **WIF Provider 리소스 경로�
 | B3 | Keycloak 토큰으로 직접 assume | CloudShell에서 `aws sts assume-role-with-web-identity --role-arn arn:aws:iam::<ACCOUNT_ID>:role/<ADMIN_ROLE> --role-session-name check --web-identity-token '<토큰>'` (토큰은 1-1 스니펫 뒤 `copy(kc.access_token)`으로 복사) | `Credentials` 반환. 실패하면 원인은 2·3단계(mc-iam-manager 아님) |
 | B4 | 사용자용 Role | IAM → Roles → `mciam-<이름>` | 신뢰 정책이 B2와 같은 Provider·`aud`, 권한 정책이 붙어 있음 |
 
-### C. mc-iam-manager 등록
+### C. mc-iam-manager 등록 (mc-web-console, 브라우저 개발자 도구)
 
 | ID | 점검 항목 | 확인 방법 | 기대 결과 |
 |---|---|---|---|
@@ -532,14 +580,14 @@ GCP SAML은 Keycloak SAML 클라이언트 ID가 **WIF Provider 리소스 경로�
 | C4 | CSP Role | CSP Roles 화면 또는 `await api('GET', '/api/roles/csp/id/<id>')` | Status `created`, IAM Identifier=Role ARN, IDP Identifier=`<PROVIDER_ARN>` (비어 있으면 안 됨) |
 | C5 | (AWS OIDC 외) 연결값 | C4 응답 | `cspIdpConfigId`가 C2의 id, SAML이면 `extendedConfig.saml_client_id` 존재 |
 
-### D. 매핑·할당
+### D. 매핑·할당 (mc-web-console)
 
 | ID | 점검 항목 | 확인 방법 | 기대 결과 |
 |---|---|---|---|
 | D1 | 역할 ↔ CSP Role 매핑 | Roles 화면 → 역할 → CSP Role Mapping 카드 | C4의 CSP Role이 매핑되어 있고, 같은 CSP·인증방식 매핑이 하나뿐 |
 | D2 | 사용자 할당 | Workspaces 화면의 멤버 목록 | 대상 사용자가 D1의 역할로 할당 (그룹 상속도 인정) |
 
-### E. 발급
+### E. 발급 (브라우저 개발자 도구, CloudShell)
 
 | ID | 점검 항목 | 확인 방법 | 기대 결과 |
 |---|---|---|---|
