@@ -34,6 +34,31 @@ AWS 쪽은 **최초 1회만** 사람이 설정합니다. 이때 만드는 **관�
 
 "환경"은 Keycloak issuer 하나(예: dev, stage, prod 서버 각각)를 말합니다. 서버(VM) 작업만 SSH가 필요하고 나머지는 모두 브라우저에서 합니다.
 
+### mc-web-console 화면 지원 현황과 대안
+
+mc-web-console 화면이 없는 작업은 **❌ 화면 없음**으로 표시했습니다. 그중 mc-iam-manager API로 대신할 수 있는 것은 [개발자 도구](#개발자-도구에서-api-호출하기)에서 호출합니다.
+
+| 단계 | 작업 | mc-web-console 화면 | mc-iam-manager API 대안 |
+|---|---|---|---|
+| 1-1 | Keycloak OIDC 클라이언트 추가 | ❌ 화면 없음 | ❌ 없음 (`/api/initial-admin`은 `mciamClient`만 생성) → Keycloak Admin Console |
+| 1-2 | 환경변수 설정 | ❌ 화면 없음 | ❌ 없음 → 서버(VM) |
+| 2 | AWS OIDC Provider 생성 | ❌ 화면 없음 | ❌ 없음 → AWS 콘솔 |
+| 3 | 관리용 Role 확인·생성·신뢰 관계 추가 | ❌ 화면 없음 | ❌ 없음 → AWS 콘솔 (관리용 Role이 이 환경을 신뢰하기 전에는 mc-iam-manager가 AWS에 접근할 수 없으므로 구조상 불가) |
+| 4-1 | CSP Account 등록 | ✅ Settings > Environment > Cloud SPs > CSP Accounts | `POST /api/csp-accounts` |
+| 4-2 | IdP Config 등록·수정 | ❌ 화면 없음 | ✅ `POST /api/csp-idp-configs`, `PUT /api/csp-idp-configs/id/{id}` |
+| 4-2 | IdP Config 연결 테스트·활성화 | ❌ 화면 없음 | ✅ `POST /api/csp-idp-configs/id/{id}/test`, `/activate`, `/deactivate` |
+| 5-1 | 사용자용 CSP Role 등록 (AWS Role 자동 생성) | ✅ Operations > Manage > Workspaces > CSP Roles | `POST /api/roles/csp` |
+| 5-1 | IDP Identifier 수정 | ✅ CSP Roles → Edit | `PUT /api/roles/csp/id/{id}` |
+| 5-2 | AWS Role에 권한 정책 부여 | ⚠️ CSP Roles 화면에 정책 등록·attach가 있으나 **mc-iam-manager DB에만 기록되고 AWS에는 반영 안 됨** | ❌ 없음 (`/api/csp-policies/attach`도 DB만) → AWS 콘솔 |
+| 5-2 | AWS Role 신뢰 정책 수정 | ❌ 화면 없음 | ⚠️ `PUT /api/csp/iam/roles/{roleName}?csp_account_id=`가 있으나 신뢰 정책에 `Condition`을 담을 수 없고, 호출자 사용자 토큰으로 관리용 Role을 assume하는 구조라 **코드상 사용 불가로 판단**(미실증) → AWS 콘솔 |
+| 5-3 | CSP Role에 IdP Config 연결, SAML 클라이언트 ID | ❌ 화면 없음 | ✅ `PUT /api/roles/csp/id/{id}` (`cspIdpConfigId`, `extendedConfig`) |
+| 6-1 | 역할 ↔ CSP Role 매핑 | ✅ Workspaces > Roles → CSP Role Mapping 카드 | `POST /api/roles`, `PUT /api/roles/id/{id}`의 `cspRoles` |
+| 6-2 | 사용자 워크스페이스 역할 할당 | ✅ Workspaces → 멤버 추가 | `POST /api/roles/assign/workspace-role` |
+| 7-1 | 임시자격증명 발급 | ❌ 화면 없음 | ✅ `POST /api/workspaces/temporary-credentials` |
+| 7-3 | 단계별 진단 | ❌ 화면 없음 | ✅ `POST /api/workspaces/credentials/validate` |
+
+정리하면 mc-iam-manager 쪽에서 화면이 없는 작업(4-2, 5-3, 7-1, 7-3)은 모두 API로 대신할 수 있습니다. 반면 Keycloak·서버·AWS 쪽 작업(1-1, 1-2, 2, 3)과 AWS 정책 부여(5-2)는 API 대안이 없어 각 콘솔에서 해야 합니다.
+
 ### 표기
 
 실제 계정 정보는 문서·티켓·채팅에 남기지 말고 아래 표기로 바꿔 씁니다.
@@ -78,7 +103,7 @@ var TOKEN = await login();   // 플랫폼 관리자 계정
 
 ## 1. 사전 점검
 
-### 1-1. Keycloak OIDC 클라이언트
+### 1-1. Keycloak OIDC 클라이언트 (❌ mc-web-console 화면 없음, API 대안 없음)
 
 > **수행 위치: Keycloak Admin Console** (`https://<KC_DOMAIN>/auth/admin/`)
 
@@ -137,7 +162,7 @@ console.log(kc.error ?? { access: (({iss, azp, aud}) => ({iss, azp, aud}))(jwt(k
 
 정상이면 `iss`가 `<ISSUER>`, access token의 `azp`와 id token의 `aud`가 `<OIDC_CLIENT>`입니다(access token의 `aud`가 `account`인 것은 정상). `iss`가 `http://mc-iam-manager-kc:8080/...` 같은 내부 주소면 Keycloak 컨테이너에 `KC_HOSTNAME_URL=https://<KC_DOMAIN>/auth`가 설정됐는지 확인하세요.
 
-### 1-2. mc-iam-manager 환경변수
+### 1-2. mc-iam-manager 환경변수 (❌ 화면 없음, API 대안 없음)
 
 > **수행 위치: 서버(VM)**: mc-iam-manager 컨테이너가 실행되는 호스트에 SSH로 접속해서 합니다. 브라우저로는 할 수 없습니다.
 
@@ -167,7 +192,7 @@ compose 프로젝트명은 `docker inspect mc-iam-manager --format '{{index .Con
 
 ---
 
-## 2. AWS: 해당 환경의 OIDC Provider 생성 (환경마다 1회)
+## 2. AWS: 해당 환경의 OIDC Provider 생성 (환경마다 1회, ❌ mc-web-console 화면 없음, API 대안 없음)
 
 > **수행 위치: Provider(AWS) 콘솔**: IAM 관리 권한이 있는 계정으로 로그인 → **IAM** → 왼쪽 **Identity providers**
 
@@ -201,7 +226,7 @@ aws iam create-open-id-connect-provider --url "https://${ISSUER_HOSTPATH}" --cli
 
 ---
 
-## 3. AWS: 관리용 Role 준비 (환경마다 1회)
+## 3. AWS: 관리용 Role 준비 (환경마다 1회, ❌ mc-web-console 화면 없음, API 대안 없음)
 
 > **수행 위치: Provider(AWS) 콘솔** → **IAM** → 왼쪽 **Roles**
 
@@ -332,7 +357,7 @@ await api('POST', '/api/csp-accounts/list', {});
 
 응답에서 해당 계정의 `id`가 `<CSP_ACCOUNT_ID>`입니다.
 
-### 4-2. IdP Config (화면 없음, 개발자 도구에서)
+### 4-2. IdP Config (❌ 화면 없음 → API로)
 
 ```js
 await api('POST', '/api/csp-idp-configs', {
@@ -373,7 +398,7 @@ mc-web-console → **Operations > Manage > Workspaces > CSP Roles** → Add CSP 
 
 목록에서 Status가 `created`인지 확인합니다. `failed`면 원인을 고친 뒤 같은 이름으로 다시 등록할 수 있습니다.
 
-### 5-2. 권한 정책 부여 (AWS 콘솔)
+### 5-2. 권한 정책 부여 (⚠️ 화면은 있으나 AWS 미반영, API 대안 없음 → AWS 콘솔)
 
 > **현재 mc-iam-manager로는 AWS Role에 권한 정책을 붙일 수 없습니다.** CSP Policy의 attach API(`/api/csp-policies/attach`)는 mc-iam-manager DB에만 기록하고 AWS에는 반영하지 않습니다. 그래서 정책은 AWS 콘솔에서 붙입니다.
 
@@ -381,7 +406,7 @@ AWS IAM → Roles → `mciam-<이름>` → **Permissions** → Add permissions �
 
 **Trust relationships** 탭에서 자동 생성된 신뢰 정책이 `<PROVIDER_ARN>`과 `aud`=`<OIDC_CLIENT>`인지도 확인합니다. Provider가 `mc-iam-manager-kc...` 같은 내부 주소거나 `aud`가 `notyet`이면 1-2 환경변수가 잘못된 것입니다. 이 경우 환경변수를 고친 뒤 Role의 신뢰 정책을 3-3의 문장으로 바꿉니다.
 
-### 5-3. 화면에서 입력할 수 없는 값
+### 5-3. 화면에서 입력할 수 없는 값 (❌ 화면 없음 → API로)
 
 **IdP Config 연결(`cspIdpConfigId`)**과 **SAML 클라이언트 ID(`extendedConfig.saml_client_id`)**는 화면에 입력란이 없습니다. AWS OIDC는 둘 다 없어도 동작하지만(IdP Config가 없으면 OIDC로 간주), SAML이나 다른 CSP는 개발자 도구에서 채웁니다. CSP Role id는 `await api('POST', '/api/roles/csp/list', {})`로 확인합니다.
 
@@ -416,7 +441,7 @@ mc-web-console → **Operations > Manage > Workspaces** → 워크스페이스 �
 
 > **수행 위치: 브라우저 개발자 도구**(7-1, 7-3), **Provider(AWS) CloudShell**(7-2)
 
-### 7-1. 발급 (개발자 도구)
+### 7-1. 발급 (❌ 화면 없음 → API로)
 
 **발급받을 사용자**로 로그인한 토큰을 씁니다. 관리자 토큰으로 호출하면 관리자의 역할 기준으로 발급됩니다. 개발자 도구 콘솔에서:
 
@@ -466,7 +491,7 @@ unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN   # 끝나면 �
 
 세션 이름에 Keycloak 사용자 ID가 들어가므로 CloudTrail에서 누가 발급받았는지 추적할 수 있습니다.
 
-### 7-3. 실패 원인 단계별 진단
+### 7-3. 실패 원인 단계별 진단 (❌ 화면 없음 → API로)
 
 발급이 실패하면 같은 체인을 단계별로 점검하는 API를 먼저 돌려 보세요. 단계별 성공/실패와 조치 힌트를 돌려줍니다.
 
