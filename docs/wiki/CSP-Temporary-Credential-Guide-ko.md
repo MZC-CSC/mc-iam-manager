@@ -495,8 +495,12 @@ CloudShell에 붙여 넣은 뒤:
 ```bash
 aws sts get-caller-identity
 # "Arn": "arn:aws:sts::<ACCOUNT_ID>:assumed-role/mciam-<이름>/mciam-<keycloak-user-id>-<unix-time>"
-aws ec2 describe-regions --query 'Regions[0].RegionName'   # 허용된 작업 → 성공
-aws s3 ls                                                   # 허용 안 된 작업 → AccessDenied
+aws ec2 describe-instances --region ap-northeast-2 \
+  --query 'Reservations[].Instances[].[InstanceId, State.Name, InstanceType, VpcId, Tags[?Key==`Name`]|[0].Value]' --output table   # EC2 목록
+aws ec2 describe-vpcs --region ap-northeast-2 \
+  --query 'Vpcs[].[VpcId, CidrBlock, IsDefault, Tags[?Key==`Name`]|[0].Value]' --output table                                       # VPC 목록
+aws ec2 create-tags --resources <VPC_ID> --tags Key=test,Value=1 --dry-run   # 쓰기 → UnauthorizedOperation (읽기 전용 정책일 때)
+aws s3 ls                                                                     # 허용 안 된 서비스 → AccessDenied
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN   # 끝나면 해제
 ```
 
@@ -634,6 +638,61 @@ GCP SAML은 Keycloak SAML 클라이언트 ID가 **WIF Provider 리소스 경로�
 | E3 | 발급 주체 | 7-2 `aws sts get-caller-identity` | `assumed-role/mciam-<이름>/mciam-<keycloak-user-id>-<unix>` |
 | E4 | 권한 범위 | 7-2의 허용·비허용 작업 | 허용 작업은 성공, 비허용 작업은 `AccessDenied` |
 | E5 | 차단 확인 | 매핑이 없는 역할의 사용자로 7-1 | `403 No suitable CSP role mapping found ...` |
+
+## 10. 알려진 제약 (2026-10-22 기준, mc-iam-manager 0.7.1)
+
+| # | 제약 | 영향 | 우회 |
+|---|---|---|---|
+| 1 | 설치 시 Keycloak `<OIDC_CLIENT>` 클라이언트가 생성되지 않음 | 클린 설치 환경에서 발급이 항상 `invalid_client` | 1-1에서 직접 추가 |
+| 2 | `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL`, `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_ID`, `MC_IAM_MANAGER_AWS_ACCOUNT_ID` 기본값이 비어 있거나 `notyet` | AWS Role 자동 생성 실패 또는 잘못된 신뢰 정책 | 1-2 |
+| 3 | 정책 attach(`/api/csp-policies/attach`, CSP Roles 화면)가 DB에만 기록되고 AWS에 반영 안 됨 | mc-iam-manager로 권한 정책 부여 불가 | 5-2, AWS 콘솔 |
+| 4 | AWS에 이미 있는 Role을 CSP Role로 등록하면 IDP Identifier가 저장되지 않음 | 발급 시 `IDP ARN이 설정되지 않았습니다` | 5-1, CSP Roles → Edit |
+| 5 | Roles 화면 CSP Role Mapping이 선택한 Role 대신 `mciam-<역할명>` Role을 AWS에 새로 만들어 매핑 | 권한 없는 Role이 생기고 의도와 다른 매핑 | 6-1, 매핑 API |
+| 6 | 진단 API(`credentials/validate`) 4단계가 서버 AWS 자격증명을 요구 | 기본 배포에서 항상 실패 | 7-3, 1~3단계만 참고 |
+| 7 | `PUT /api/csp/iam/roles/{roleName}`이 호출자 토큰으로 assume하고, 신뢰 정책을 `Federated`·`Condition` 없이 전체 교체 | 호출 불가, 통과해도 OIDC 신뢰가 사라짐 | 호출 금지, AWS 콘솔 |
+| 8 | mc-web-console에 IdP Config 등록, `cspIdpConfigId`·SAML 클라이언트 ID 입력, 발급·진단 화면 없음. CSP Accounts의 Credential Data 예시가 실제 입력값과 다름 | 화면만으로는 완료 불가 | 개발자 도구에서 API |
+| 9 | Swagger UI(`/swagger/index.html`)가 인증 헤더 없이는 401 | 브라우저에서 바로 열리지 않음 | 개발자 도구에서 API |
+
+## 11. 검증 기록
+
+### 2026-10-22, stage 환경 (mc-admin-cli 설치, mc-iam-manager 0.7.1), AWS + OIDC
+
+계정 ID, 도메인, 사용자·역할 ID는 가렸습니다.
+
+**API 경로** (이 문서의 절차를 개발자 도구·API로 수행)
+
+| 단계 | 수행 내용 | 결과 |
+|---|---|---|
+| 1-1 | Keycloak에 `<OIDC_CLIENT>` 없음 확인 → 추가 | ✅ 추가 후 토큰 발급 (`iss`=공개 issuer, access `azp`·id `aud`=`<OIDC_CLIENT>`) |
+| 1-2 | 서버 `conf/mc-iam-manager/.env` 3개 값 설정 → 컨테이너 재생성 | ✅ healthy, 로그인 정상 |
+| 2 | OIDC Provider 생성 (AWS 콘솔) | ✅ |
+| 3-3 | 기존 관리용 Role 신뢰 관계에 stage 문장 추가 (기존 문장 유지) | ✅ |
+| 4-1 | `POST /api/csp-accounts` | ✅ 201 |
+| 4-2 | `POST /api/csp-idp-configs` (`role_arn`=관리용 Role), `/test` | ✅ 201, `Connection test successful` |
+| 5-1 | `POST /api/roles/csp` (`cspRoleName`=`state-api-ec2ro`) | ✅ 201. AWS에 `mciam-state-api-ec2ro` 자동 생성, 신뢰 정책 Provider·`aud` 정상, IDP·IAM Identifier 자동 채움 |
+| 5-2 | `AmazonEC2ReadOnlyAccess` 부여 (AWS) | ✅ |
+| 6-1 | `POST /api/roles` (cspRoles 없이) → `POST /api/roles/csp-roles` | ✅ 201. `POST /api/roles`에 `cspRoles`를 넣었을 때는 500 (제약 5와 같은 원인) |
+| 6-2 | 테스트 사용자 생성·비밀번호 설정 → `POST /api/roles/assign/workspace-role` | ✅ |
+
+| 체크리스트 | 결과 |
+|---|---|
+| A1~A5 | ✅ (A2·A3은 1-1 조치 후) |
+| B1~B4 | ✅ B3: OIDC 클라이언트 토큰으로 관리용 Role assume 성공. 플랫폼 관리자 로그인 토큰(`azp`=`mciamClient`)은 `InvalidIdentityToken` |
+| C1~C4 | ✅ |
+| D1~D2 | ✅ |
+| E1 | ⚠️ 1~3단계 `ok`, 4단계 `failed` (제약 6) |
+| E2 | ✅ 200, 유효기간 1시간 |
+| E3 | ✅ `assumed-role/mciam-state-api-ec2ro/mciam-<keycloak-user-id>-<unix>` |
+| E4 | ✅ `describe-instances`(EC2 목록)·`describe-vpcs`(VPC 목록)·`describe-subnets` 성공, `create-tags --dry-run` → `UnauthorizedOperation`, `s3 ls`·`iam list-roles` → `AccessDenied` |
+| E5 | ✅ 매핑 없는 조합 → 403 |
+
+**브라우저 경로** (mc-web-console·AWS 콘솔·Keycloak Admin Console)
+
+| 단계 | 결과 |
+|---|---|
+| (추가 예정) | |
+
+브라우저 테스트 중 확인된 사항: Roles 화면에서 `viewer` 역할에 CSP Role을 매핑하자 선택한 Role 대신 `mciam-viewer`가 AWS에 생성·매핑됨 (제약 5).
 
 ## 관련 문서
 
