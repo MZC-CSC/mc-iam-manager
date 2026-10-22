@@ -50,7 +50,7 @@ mc-web-console 화면이 없는 작업은 **❌ 화면 없음**으로 표시했�
 | 5-1 | 사용자용 CSP Role 등록 (AWS Role 자동 생성) | ✅ Operations > Manage > Workspaces > CSP Roles | `POST /api/roles/csp` |
 | 5-1 | IDP Identifier 수정 | ✅ CSP Roles → Edit | `PUT /api/roles/csp/id/{id}` |
 | 5-2 | AWS Role에 권한 정책 부여 | ⚠️ CSP Roles 화면에 정책 등록·attach가 있으나 **mc-iam-manager DB에만 기록되고 AWS에는 반영 안 됨** | ❌ 없음 (`/api/csp-policies/attach`도 DB만) → AWS 콘솔 |
-| 5-2 | AWS Role 신뢰 정책 수정 | ❌ 화면 없음 | ⚠️ `PUT /api/csp/iam/roles/{roleName}?csp_account_id=`가 있으나 신뢰 정책에 `Condition`을 담을 수 없고, 호출자 사용자 토큰으로 관리용 Role을 assume하는 구조라 **코드상 사용 불가로 판단**(미실증) → AWS 콘솔 |
+| 5-2 | AWS Role 신뢰 정책 수정 | ❌ 화면 없음 | ❌ **사용 불가, 호출 금지**: `PUT /api/csp/iam/roles/{roleName}`이 있으나 ① 호출자 로그인 토큰(`azp`=`mciamClient`)으로 관리용 Role을 assume해서 AWS가 `InvalidIdentityToken`으로 거부(플랫폼 관리자 토큰으로 실증), ② 통과하더라도 신뢰 정책에 `Federated`·`Condition`을 담지 못한 채 **정책 전체를 교체**해 OIDC 신뢰가 사라짐 → AWS 콘솔 (3-3 방식) |
 | 5-3 | CSP Role에 IdP Config 연결, SAML 클라이언트 ID | ❌ 화면 없음 | ✅ `PUT /api/roles/csp/id/{id}` (`cspIdpConfigId`, `extendedConfig`) |
 | 6-1 | 역할 ↔ CSP Role 매핑 | ✅ Workspaces > Roles → CSP Role Mapping 카드 | `POST /api/roles`, `PUT /api/roles/id/{id}`의 `cspRoles` |
 | 6-2 | 사용자 워크스페이스 역할 할당 | ✅ Workspaces → 멤버 추가 | `POST /api/roles/assign/workspace-role` |
