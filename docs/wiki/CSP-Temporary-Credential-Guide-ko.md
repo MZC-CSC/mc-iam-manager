@@ -52,10 +52,10 @@ mc-web-console 화면이 없는 작업은 **❌ 화면 없음**으로 표시했�
 | 5-2 | AWS Role에 권한 정책 부여 | ⚠️ CSP Roles 화면에 정책 등록·attach가 있으나 **mc-iam-manager DB에만 기록되고 AWS에는 반영 안 됨** | ❌ 없음 (`/api/csp-policies/attach`도 DB만) → AWS 콘솔 |
 | 5-2 | AWS Role 신뢰 정책 수정 | ❌ 화면 없음 | ❌ **사용 불가, 호출 금지**: `PUT /api/csp/iam/roles/{roleName}`이 있으나 ① 호출자 로그인 토큰(`azp`=`mciamClient`)으로 관리용 Role을 assume해서 AWS가 `InvalidIdentityToken`으로 거부(플랫폼 관리자 토큰으로 실증), ② 통과하더라도 신뢰 정책에 `Federated`·`Condition`을 담지 못한 채 **정책 전체를 교체**해 OIDC 신뢰가 사라짐 → AWS 콘솔 (3-3 방식) |
 | 5-3 | CSP Role에 IdP Config 연결, SAML 클라이언트 ID | ❌ 화면 없음 | ✅ `PUT /api/roles/csp/id/{id}` (`cspIdpConfigId`, `extendedConfig`) |
-| 6-1 | 역할 ↔ CSP Role 매핑 | ✅ Workspaces > Roles → CSP Role Mapping 카드 | `POST /api/roles`, `PUT /api/roles/id/{id}`의 `cspRoles` |
+| 6-1 | 역할 ↔ CSP Role 매핑 | ⚠️ Workspaces > Roles → CSP Role Mapping 카드가 있으나 **선택한 CSP Role 대신 `mciam-<역할명>` Role을 AWS에 새로 만들어 매핑함**(stage 실증) | ✅ `POST /api/roles/csp-roles` (매핑만, AWS 호출 없음). `POST/PUT /api/roles`의 `cspRoles`는 쓰지 말 것 |
 | 6-2 | 사용자 워크스페이스 역할 할당 | ✅ Workspaces → 멤버 추가 | `POST /api/roles/assign/workspace-role` |
 | 7-1 | 임시자격증명 발급 | ❌ 화면 없음 | ✅ `POST /api/workspaces/temporary-credentials` |
-| 7-3 | 단계별 진단 | ❌ 화면 없음 | ✅ `POST /api/workspaces/credentials/validate` |
+| 7-3 | 단계별 진단 | ❌ 화면 없음 | ⚠️ `POST /api/workspaces/credentials/validate`가 있으나 서버에 AWS 자격증명이 없는 기본 배포에서는 4단계가 항상 실패(stage 실증) |
 
 정리하면 mc-iam-manager 쪽에서 화면이 없는 작업(4-2, 5-3, 7-1, 7-3)은 모두 API로 대신할 수 있습니다. 반면 Keycloak·서버·AWS 쪽 작업(1-1, 1-2, 2, 3)과 AWS 정책 부여(5-2)는 API 대안이 없어 각 콘솔에서 해야 합니다.
 
@@ -421,9 +421,20 @@ await api('PUT', '/api/roles/csp/id/<CSP_ROLE_ID>', { cspIdpConfigId: <IDP_CONFI
 
 > **수행 위치: mc-web-console**
 
-### 6-1. 역할 ↔ CSP Role 매핑
+### 6-1. 역할 ↔ CSP Role 매핑 (⚠️ 화면 결함 → API로)
 
-별도 화면이 아닙니다. mc-web-console → **Operations > Manage > Workspaces > Roles** → 역할 Add 또는 Edit → **CSP Role Mapping** 카드에서 CSP Provider와 5단계의 CSP Role을 골라 추가한 뒤 역할을 저장합니다.
+> **⚠️ 현재 Roles 화면의 CSP Role Mapping은 쓰지 마세요.** 화면에서 CSP Role을 골라 저장하면, 선택한 Role이 아니라 **`mciam-<역할 이름>` Role을 AWS에 새로 만들고(권한 정책 없음) 그것을 매핑**합니다. stage에서 `viewer` 역할에 `mciam-ec2ro`를 골랐는데 `mciam-viewer`가 생성·매핑된 것으로 확인했습니다. 원인은 화면이 고른 이름을 `roleName`으로 보내는데 서버는 `cspRoleName`만 읽기 때문입니다. 같은 이유로 API의 `POST /api/roles`, `PUT /api/roles/id/{id}`에 `cspRoles`를 넣는 것도 피합니다.
+
+**대안: 매핑 API** (AWS를 호출하지 않고 DB 매핑만 만듭니다). 역할은 Roles 화면에서 CSP Role Mapping 없이 만들어 둔 뒤, 개발자 도구에서:
+
+```js
+await api('POST', '/api/roles/list', {});        // 역할 id 확인
+await api('POST', '/api/roles/csp/list', {});    // CSP Role id 확인
+await api('POST', '/api/roles/csp-roles', { roleId: '<ROLE_ID>', cspRoleId: '<CSP_ROLE_ID>', cspType: 'aws', authMethod: 'OIDC' });
+await api('GET', '/api/roles/csp-roles/id/<ROLE_ID>');   // 매핑 확인
+```
+
+잘못 매핑된 것을 지울 때: `await api('DELETE', '/api/roles/csp-roles', { roleId: '<ROLE_ID>', cspRoleId: '<CSP_ROLE_ID>', authMethod: 'OIDC' });`
 
 - 하나의 역할에 CSP별·인증방식별로 여러 CSP Role을 매핑할 수 있습니다.
 - **같은 역할 + CSP + 인증방식 조합에 CSP Role을 둘 이상 매핑하지 마세요.** 우선순위 규칙이 없어 첫 번째 것만 쓰입니다.
@@ -493,7 +504,9 @@ unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN   # 끝나면 �
 
 ### 7-3. 실패 원인 단계별 진단 (❌ 화면 없음 → API로)
 
-발급이 실패하면 같은 체인을 단계별로 점검하는 API를 먼저 돌려 보세요. 단계별 성공/실패와 조치 힌트를 돌려줍니다.
+같은 체인을 단계별로 점검하고 조치 힌트를 돌려주는 API입니다.
+
+> **⚠️ 기본 배포에서는 4단계 "AWS OIDC Provider 확인"이 항상 실패합니다.** 이 단계는 관리용 Role이 아니라 서버 자체 AWS 자격증명으로 IAM을 조회하는데, 컨테이너에 AWS 자격증명이 없어 `AWS 자격증명 없음 (degraded mode)`가 나고 이후 단계는 건너뜁니다. 실제 발급(7-1)은 정상이어도 그렇습니다. 그래서 1~3단계(DB 매핑, CspRole 설정, Keycloak 토큰) 확인용으로만 쓰고, 최종 판단은 7-1 발급 결과와 [체크리스트 B3](#9-점검-체크리스트)로 합니다.
 
 ```js
 await api('POST', '/api/workspaces/credentials/validate', { workspaceId: '<WORKSPACE_ID>', cspType: 'aws', authMethod: 'OIDC' });
@@ -609,14 +622,14 @@ GCP SAML은 Keycloak SAML 클라이언트 ID가 **WIF Provider 리소스 경로�
 
 | ID | 점검 항목 | 확인 방법 | 기대 결과 |
 |---|---|---|---|
-| D1 | 역할 ↔ CSP Role 매핑 | Roles 화면 → 역할 → CSP Role Mapping 카드 | C4의 CSP Role이 매핑되어 있고, 같은 CSP·인증방식 매핑이 하나뿐 |
+| D1 | 역할 ↔ CSP Role 매핑 | `await api('GET', '/api/roles/csp-roles/id/<roleId>')` | C4의 CSP Role이 매핑되어 있고, 같은 CSP·인증방식 매핑이 하나뿐 |
 | D2 | 사용자 할당 | Workspaces 화면의 멤버 목록 | 대상 사용자가 D1의 역할로 할당 (그룹 상속도 인정) |
 
 ### E. 발급 (브라우저 개발자 도구, CloudShell)
 
 | ID | 점검 항목 | 확인 방법 | 기대 결과 |
 |---|---|---|---|
-| E1 | 단계별 진단 | 7-3 | `valid: true`, 모든 단계 성공 |
+| E1 | 단계별 진단 | 7-3 | 1~3단계 `ok` (4단계 `failed`는 기본 배포에서 정상, 7-3 참고) |
 | E2 | 발급 | 7-1 (사용자 토큰) | 200, 자격증명과 `expiration` 반환 |
 | E3 | 발급 주체 | 7-2 `aws sts get-caller-identity` | `assumed-role/mciam-<이름>/mciam-<keycloak-user-id>-<unix>` |
 | E4 | 권한 범위 | 7-2의 허용·비허용 작업 | 허용 작업은 성공, 비허용 작업은 `AccessDenied` |
