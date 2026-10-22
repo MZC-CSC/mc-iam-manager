@@ -166,11 +166,11 @@ console.log(kc.error ?? { access: (({iss, azp, aud}) => ({iss, azp, aud}))(jwt(k
 
 > **수행 위치: 서버(VM)**: mc-iam-manager 컨테이너가 실행되는 호스트에 SSH로 접속해서 합니다. 브라우저로는 할 수 없습니다.
 
-5단계에서 mc-iam-manager가 AWS에 사용자용 Role을 만들 때 신뢰 정책을 아래 값으로 조립합니다. 샘플 기본값(`notyet`, 빈 값) 그대로면 Role 생성이 실패하거나 **동작하지 않는 Role이 만들어집니다.**
+5단계에서 mc-iam-manager가 AWS에 사용자용 Role을 만들 때 신뢰 정책을 아래 값으로 조립합니다. 샘플 기본값(`notyet`, 빈 값) 그대로면 **동작하지 않는 Role이 오류 없이 만들어집니다.** AWS가 잘못된 Provider ARN(`arn:aws:iam::notyet:...`)도 그대로 받아들여 상태는 `created`로 보이고, 발급 단계에서야 실패합니다(stage 실측).
 
 | 변수 | 값 | 비우거나 틀리면 |
 |---|---|---|
-| `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL` | `https://<KC_DOMAIN>/auth` | 내부 주소(`MC_IAM_MANAGER_KEYCLOAK_HOST`)로 대체되어 신뢰 정책의 Provider가 틀어짐 |
+| `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL` | `https://<KC_DOMAIN>/auth` | 다른 호스트로 대체되어 신뢰 정책의 Provider가 틀어짐 (코드상 `MC_IAM_MANAGER_KEYCLOAK_HOST`로 대체, stage 실측에서는 샘플 도메인이 들어감) |
 | `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_ID` | `<OIDC_CLIENT>`와 같은 값 | 신뢰 정책의 `aud`가 틀어져 assume 거부 |
 | `MC_IAM_MANAGER_AWS_ACCOUNT_ID` | `<ACCOUNT_ID>` | `MC_IAM_MANAGER_AWS_ACCOUNT_ID environment variable is not set`. 시스템 전체에서 AWS 계정 1개만 지원 |
 | `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_SECRET` | 1-1 클라이언트의 secret | `401 invalid_client` |
@@ -688,11 +688,21 @@ GCP SAML은 Keycloak SAML 클라이언트 ID가 **WIF Provider 리소스 경로�
 
 **브라우저 경로** (mc-web-console·AWS 콘솔·Keycloak Admin Console)
 
-| 단계 | 결과 |
-|---|---|
-| (추가 예정) | |
+| 단계 | 수행 내용 | 결과 |
+|---|---|---|
+| 2, 3-3 | AWS 콘솔에서 OIDC Provider 추가, 관리용 Role 신뢰 관계에 stage 문장 추가 (기존 문장 유지, inline 정책 확인) | ✅ |
+| 4-1 | CSP Accounts 화면에서 계정 등록 | ✅ |
+| 4-2 | IdP Config 등록(`role_arn`=관리용 Role), 연결 테스트 | ✅ 화면 없음 → 개발자 도구에서 수행 |
+| 5-1 | CSP Roles 화면에서 `ec2ro` 등록 → AWS에 `mciam-ec2ro` 자동 생성, Status `created` | ⚠️ **1-2 환경변수 설정 전에 수행해 신뢰 정책이 `arn:aws:iam::notyet:oidc-provider/<샘플 도메인>/...`, `aud`=`notyet`으로 생성**(제약 2). AWS 콘솔에서 신뢰 정책을 3-3 문장으로 수정하고, CSP Roles → Edit로 IDP Identifier 수정, 개발자 도구로 IdP Config 연결 |
+| 5-2 | AWS 콘솔에서 `AmazonEC2ReadOnlyAccess` 부여 | ✅ |
+| 6-1 | Roles 화면에서 `viewer`에 `mciam-ec2ro` 매핑 | ❌ 선택한 Role 대신 `mciam-viewer`가 AWS에 새로 생성·매핑됨(제약 5) → 매핑 API로 `mciam-ec2ro`에 다시 매핑 |
+| 6-2 | Workspaces 화면에서 플랫폼 관리자 계정을 ws01에 `viewer`로 할당 | ✅ |
+| 7-1 | 개발자 도구에서 발급 (ws01, aws, OIDC) | ✅ 200, 키 3종, 유효기간 1시간 |
+| E3 | CloudTrail `AssumeRoleWithWebIdentity` | ✅ `assumed-role/mciam-ec2ro/mciam-<keycloak-user-id>-<unix>` — 계정 → 역할 → CSP Role 연결 확인 |
+| E5 | 매핑 없는 조합(gcp, aws SAML) | ✅ 403 `No suitable CSP role mapping` |
+| 7-3 | 진단 API | ⚠️ 4단계 실패 (제약 6) |
 
-브라우저 테스트 중 확인된 사항: Roles 화면에서 `viewer` 역할에 CSP Role을 매핑하자 선택한 Role 대신 `mciam-viewer`가 AWS에 생성·매핑됨 (제약 5).
+**정리**: 브라우저 경로도 발급까지 성공했지만, 화면만으로는 끝낼 수 없었습니다. 1-2 환경변수를 먼저 설정해야 하고(순서가 바뀌면 잘못된 Role이 생성됨), Roles 화면 매핑과 IdP Config는 API로 처리해야 합니다.
 
 ## 관련 문서
 
