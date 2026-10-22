@@ -507,7 +507,7 @@ GCP SAML은 Keycloak SAML 클라이언트 ID가 **WIF Provider 리소스 경로�
 | ID | 점검 항목 | 확인 방법 (브라우저) | 기대 결과 |
 |---|---|---|---|
 | A1 | issuer가 외부에서 열림 | `<ISSUER>/.well-known/openid-configuration`을 브라우저로 열기 | `"issuer"`가 `<ISSUER>`와 정확히 같음 |
-| A2 | OIDC 클라이언트 존재·설정 | Keycloak Admin Console → Clients → `<OIDC_CLIENT>` | Client authentication ON, Service accounts roles ON, Direct access grants ON |
+| A2 | Keycloak에 OIDC 클라이언트가 추가되어 있는가 | Keycloak Admin Console → realm `<REALM>` → Clients 목록에서 `<OIDC_CLIENT>` 검색 → Settings, Credentials 탭 | 목록에 있음(**설치 직후에는 없음**, 1-1로 추가). Client authentication ON, Service accounts roles ON, Direct access grants ON, Credentials의 secret = 서버 `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_SECRET` |
 | A3 | 토큰 발급 | 1-1의 토큰 확인 스니펫 | 오류 없이 출력 (`invalid_client`면 클라이언트 없음 또는 secret 불일치) |
 | A4 | 토큰 `iss`·audience | 같은 스니펫 출력 | `iss`=`<ISSUER>`, access `azp`=`<OIDC_CLIENT>`, id `aud`=`<OIDC_CLIENT>` |
 | A5 | 환경변수 (서버) | `docker exec mc-iam-manager env \| grep -E 'KEYCLOAK_(EXTERNAL_URL\|OIDC_CLIENT_ID)\|AWS_ACCOUNT_ID'` | 1-2 표의 값. `notyet`이나 빈 값이 없음 |
