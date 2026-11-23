@@ -805,6 +805,40 @@ definitions:
       updated_at:
         type: string
     type: object
+  model.CspPolicyChangeResult:
+    properties:
+      bindingResults:
+        items:
+          $ref: '#/definitions/model.PolicyBindingResult'
+        type: array
+      created_at:
+        type: string
+      csp_account:
+        $ref: '#/definitions/model.CspAccount'
+      csp_account_id:
+        type: integer
+      description:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      policy_arn:
+        type: string
+      policy_doc:
+        additionalProperties: true
+        type: object
+      policy_type:
+        allOf:
+        - $ref: '#/definitions/model.PolicyType'
+        description: inline, managed, custom
+      updated_at:
+        type: string
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
   model.CspPolicyFilter:
     properties:
       csp_account_id:
@@ -1359,9 +1393,10 @@ definitions:
     - custom
     type: string
     x-enum-comments:
-      PolicyTypeCustom: 사용자 정의 정책
-      PolicyTypeInline: 인라인 정책 (역할에 직접 포함)
-      PolicyTypeManaged: 관리형 정책 (독립 정책)
+      PolicyTypeCustom: '고객 관리형 정책(계정의 독립 정책): 여러 Role 공유, IAM 이 생성·수정·삭제 (mciam-*
+        만)'
+      PolicyTypeInline: '인라인 정책: 문서를 Role 1개 안에 사본으로 저장 (Role 1개 전용)'
+      PolicyTypeManaged: 'AWS 관리형 정책(arn:aws:iam::aws:policy/...): 연결·해제만, 문서 수정 불가'
     x-enum-varnames:
     - PolicyTypeInline
     - PolicyTypeManaged
@@ -3131,7 +3166,12 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new CSP policy
+      description: |-
+        Create a CSP policy definition.
+        - inline: policy_doc required; stored in IAM and written into one CSP role on attach.
+        - managed: an AWS managed policy ARN (arn:aws:iam::aws:policy/...) only; attach and detach only.
+        - custom (customer managed): with policy_arn, registers an existing policy; without policy_arn, IAM creates it in AWS (CreatePolicy) as mciam-<name> from policy_doc.
+        Documents with an Allow statement using Action "*", "iam:*" or NotAction are rejected (403 forbidden_policy). 409 when the name exists in IAM or (custom) in AWS. 502 when AWS fails (nothing is saved).
       operationId: createCspPolicy
       parameters:
       - description: CSP Policy Info
@@ -3153,8 +3193,26 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
           schema:
             additionalProperties:
               type: string
@@ -3284,7 +3342,9 @@ paths:
     delete:
       consumes:
       - application/json
-      description: Delete a CSP policy by ID
+      description: |-
+        Delete a CSP policy definition. 409 while attached to CSP roles.
+        For a custom policy named mciam-*, the AWS policy is deleted too (non-default versions first); 409 when it is attached to AWS entities outside IAM, 502 when AWS fails. Other policies are only unregistered.
       operationId: deleteCspPolicy
       parameters:
       - description: Policy ID
@@ -3309,8 +3369,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
           schema:
             additionalProperties:
               type: string
@@ -3364,7 +3436,12 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update CSP policy details
+      description: |-
+        Update a CSP policy definition and apply document changes in AWS.
+        - custom (mciam-* only, else 403): new default version (CreatePolicyVersion; the oldest non-default version is removed at the 5-version limit). AWS first; on failure 502 and nothing is saved.
+        - inline: the document is saved, then written to the attached CSP role (PutRolePolicy). If that fails the response is 200 with warnings and the mapping is marked failed; attach again to retry. 409 when attached to more than one role.
+        - managed: documents cannot be changed (400).
+        While attached, renaming an inline policy or changing policy_arn returns 409. Forbidden documents return 403.
       operationId: updateCspPolicy
       parameters:
       - description: Policy ID
@@ -3384,9 +3461,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.CspPolicy'
+            $ref: '#/definitions/model.CspPolicyChangeResult'
         "400":
           description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
           schema:
             additionalProperties:
               type: string
@@ -3397,8 +3480,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
           schema:
             additionalProperties:
               type: string
@@ -3527,7 +3622,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Synchronize policies from the CSP cloud
+      description: Import policies from the CSP. AWS managed policies are stored as
+        managed; customer managed policies are imported only when named mciam-* (as
+        custom). Existing rows are matched by ARN within the account
       operationId: syncCspPolicies
       parameters:
       - description: Sync Policies Request
