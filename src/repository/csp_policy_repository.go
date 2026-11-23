@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/m-cmp/mc-iam-manager/model"
 	"gorm.io/gorm"
@@ -201,6 +202,55 @@ func (r *CspPolicyRepository) DetachPolicyFromRole(roleID, policyID uint) error 
 		return fmt.Errorf("policy mapping not found")
 	}
 	return nil
+}
+
+// GetRolePolicyMapping 역할-정책 매핑 행 조회 (없으면 nil)
+func (r *CspPolicyRepository) GetRolePolicyMapping(roleID, policyID uint) (*model.CspRolePolicyMapping, error) {
+	// Take 는 없을 때 ErrRecordNotFound 를 오류 로그로 남기므로 Find 로 조회한다
+	var mappings []model.CspRolePolicyMapping
+	if err := r.db.Where("csp_role_id = ? AND csp_policy_id = ?", roleID, policyID).Limit(1).Find(&mappings).Error; err != nil {
+		return nil, fmt.Errorf("failed to get role policy mapping: %w", err)
+	}
+	if len(mappings) == 0 {
+		return nil, nil
+	}
+	return &mappings[0], nil
+}
+
+// CreateRolePolicyMapping 역할-정책 매핑 행 생성 (AWS 반영 상태 포함)
+func (r *CspPolicyRepository) CreateRolePolicyMapping(mapping *model.CspRolePolicyMapping) error {
+	if err := r.db.Create(mapping).Error; err != nil {
+		return fmt.Errorf("failed to create role policy mapping: %w", err)
+	}
+	return nil
+}
+
+// UpdateRolePolicyMappingStatus 매핑 행의 AWS 반영 상태만 갱신한다 (created_at 등 다른 컬럼은 쓰지 않는다).
+// appliedAt 이 nil 이면 applied_at 은 그대로 둔다.
+func (r *CspPolicyRepository) UpdateRolePolicyMappingStatus(roleID, policyID uint, status, lastError string, appliedAt *time.Time) error {
+	values := map[string]interface{}{"aws_status": status, "last_error": lastError}
+	if appliedAt != nil {
+		values["applied_at"] = *appliedAt
+	}
+	result := r.db.Model(&model.CspRolePolicyMapping{}).
+		Where("csp_role_id = ? AND csp_policy_id = ?", roleID, policyID).
+		Updates(values)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update role policy mapping: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("policy mapping not found")
+	}
+	return nil
+}
+
+// ListRolePolicyMappings 역할의 정책 매핑 행 목록
+func (r *CspPolicyRepository) ListRolePolicyMappings(roleID uint) ([]*model.CspRolePolicyMapping, error) {
+	var mappings []*model.CspRolePolicyMapping
+	if err := r.db.Where("csp_role_id = ?", roleID).Find(&mappings).Error; err != nil {
+		return nil, fmt.Errorf("failed to list role policy mappings: %w", err)
+	}
+	return mappings, nil
 }
 
 // GetPoliciesByRoleID 역할에 연결된 정책 목록 조회

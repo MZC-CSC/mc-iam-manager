@@ -39,8 +39,47 @@ type CspRolePolicyMapping struct {
 	CspPolicyID uint       `gorm:"primaryKey" json:"csp_policy_id"`
 	CspRole     *CspRole   `gorm:"foreignKey:CspRoleID" json:"csp_role,omitempty"`
 	CspPolicy   *CspPolicy `gorm:"foreignKey:CspPolicyID" json:"csp_policy,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
+	// AWS 반영 상태 (IAM-BUG-044). 기존(DB 전용) 행은 빈 값이다. attach 를 다시 요청하면 다시 반영한다.
+	AwsStatus string     `gorm:"column:aws_status;size:20" json:"aws_status"`
+	LastError string     `gorm:"column:last_error;type:text" json:"last_error"`
+	AppliedAt *time.Time `gorm:"column:applied_at" json:"applied_at"`
+	CreatedAt time.Time  `json:"created_at"`
 }
+
+// 정책 매핑의 AWS 반영 상태
+const (
+	PolicyAwsStatusApplied      = "applied"       // AWS 에 반영됨
+	PolicyAwsStatusFailed       = "failed"        // attach 가 AWS 에서 실패 (재요청으로 다시 반영)
+	PolicyAwsStatusDetachFailed = "detach_failed" // detach 가 AWS 에서 실패 (재요청으로 다시 해제)
+)
+
+// CspRolePolicy 역할에 연결된 정책과 그 매핑의 AWS 반영 상태 (GET /csp-policies/role/:roleId)
+type CspRolePolicy struct {
+	*CspPolicy
+	AwsStatus string     `json:"aws_status"`
+	LastError string     `json:"last_error"`
+	AppliedAt *time.Time `json:"applied_at"`
+}
+
+// PolicyBindingResult attachPolicy·detachPolicy 결과.
+// AWS 반영이 실패해도 200 으로 돌려주고 result·warnings 로 알린다 (아래 계층 실패가 위 계층을 실패시키지 않음).
+type PolicyBindingResult struct {
+	Result      string   `json:"result"` // applied | failed | detached | detach_failed
+	CspRoleID   uint     `json:"cspRoleId"`
+	CspPolicyID uint     `json:"cspPolicyId"`
+	AwsStatus   string   `json:"awsStatus,omitempty"` // 남은 매핑 행의 상태 (detached 면 비어 있음)
+	ErrorCode   string   `json:"errorCode,omitempty"` // failed·detach_failed: csp_error
+	Message     string   `json:"message"`
+	Warnings    []string `json:"warnings"`
+}
+
+// PolicyBinding 결과 값
+const (
+	PolicyBindingApplied      = "applied"
+	PolicyBindingFailed       = "failed"
+	PolicyBindingDetached     = "detached"
+	PolicyBindingDetachFailed = "detach_failed"
+)
 
 // TableName CspRolePolicyMapping 테이블 이름 반환
 func (CspRolePolicyMapping) TableName() string {

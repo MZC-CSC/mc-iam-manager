@@ -869,6 +869,38 @@ definitions:
       updated_at:
         type: string
     type: object
+  model.CspRolePolicy:
+    properties:
+      applied_at:
+        type: string
+      aws_status:
+        type: string
+      created_at:
+        type: string
+      csp_account:
+        $ref: '#/definitions/model.CspAccount'
+      csp_account_id:
+        type: integer
+      description:
+        type: string
+      id:
+        type: integer
+      last_error:
+        type: string
+      name:
+        type: string
+      policy_arn:
+        type: string
+      policy_doc:
+        additionalProperties: true
+        type: object
+      policy_type:
+        allOf:
+        - $ref: '#/definitions/model.PolicyType'
+        description: inline, managed, custom
+      updated_at:
+        type: string
+    type: object
   model.CspValidationRequest:
     properties:
       authMethod:
@@ -1297,6 +1329,28 @@ definitions:
         type: integer
       role_name:
         type: string
+    type: object
+  model.PolicyBindingResult:
+    properties:
+      awsStatus:
+        description: 남은 매핑 행의 상태 (detached 면 비어 있음)
+        type: string
+      cspPolicyId:
+        type: integer
+      cspRoleId:
+        type: integer
+      errorCode:
+        description: 'failed·detach_failed: csp_error'
+        type: string
+      message:
+        type: string
+      result:
+        description: applied | failed | detached | detach_failed
+        type: string
+      warnings:
+        items:
+          type: string
+        type: array
     type: object
   model.PolicyType:
     enum:
@@ -3114,7 +3168,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: Attach a CSP policy to a CSP role
+      description: |-
+        Attach a CSP policy to a CSP role and apply it in AWS (managed: AttachRolePolicy, inline: PutRolePolicy).
+        If the AWS call fails, the mapping is kept with aws_status=failed and the response is 200 with result=failed and warnings; requesting again re-applies it.
+        Rejected without changes: 400 invalid request (no ARN/document, custom type, account mismatch), 403 forbidden_policy (non mciam-* role or denied policy), 404 role/policy not found, 409 management role. 500 only when the database update fails (the AWS change is reverted).
       operationId: attachPolicyToRole
       parameters:
       - description: Attach Policy Request
@@ -3129,17 +3186,27 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/model.PolicyBindingResult'
         "400":
           description: Bad Request
           schema:
             additionalProperties:
               type: string
             type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
           schema:
             additionalProperties:
               type: string
@@ -3159,7 +3226,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: Detach a CSP policy from a CSP role
+      description: |-
+        Detach a CSP policy from a CSP role in AWS (managed: DetachRolePolicy, inline: DeleteRolePolicy), then remove the mapping. NoSuchEntity from AWS counts as already detached.
+        If the AWS call fails, the mapping is kept with aws_status=detach_failed and the response is 200 with result=detach_failed and warnings; requesting again retries.
+        Rejected without changes: 400, 403 forbidden_policy (non mciam-* role), 404 (role/policy not found or not attached), 409 management role. 500 only when the database update fails.
       operationId: detachPolicyFromRole
       parameters:
       - description: Detach Policy Request
@@ -3174,17 +3244,27 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/model.PolicyBindingResult'
         "400":
           description: Bad Request
           schema:
             additionalProperties:
               type: string
             type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
           schema:
             additionalProperties:
               type: string
@@ -3407,7 +3487,9 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get list of policies attached to a CSP role
+      description: 'Get list of policies attached to a CSP role, with the AWS state
+        of each mapping (aws_status: applied | failed | detach_failed, empty for mappings
+        made before AWS was applied; last_error; applied_at)'
       operationId: getRolePolicies
       parameters:
       - description: Role ID
@@ -3422,7 +3504,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/model.CspPolicy'
+              $ref: '#/definitions/model.CspRolePolicy'
             type: array
         "400":
           description: Bad Request

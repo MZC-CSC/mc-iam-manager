@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/m-cmp/mc-iam-manager/model"
+	"github.com/m-cmp/mc-iam-manager/repository"
 )
 
 // 관리용 Role 보호 (계획 3단계)
@@ -13,8 +14,8 @@ import (
 
 // isManagementRole 이름 또는 ARN 이 어떤 IdP Config 의 관리용 Role(role_arn)인지 확인한다.
 // ARN 이 있으면 ARN 전체로, 없으면 Role 이름(ARN 의 마지막 경로)으로 비교한다. 이름 비교는 다른 계정의 같은 이름도 보호 쪽으로 판정한다.
-func (s *CspRoleService) isManagementRole(roleName, roleArn string) (bool, *model.CspIdpConfig, error) {
-	configs, err := s.cspIdpConfigRepo.List(nil)
+func isManagementRole(idpConfigRepo *repository.CspIdpConfigRepository, roleName, roleArn string) (bool, *model.CspIdpConfig, error) {
+	configs, err := idpConfigRepo.List(nil)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to list IdP configs: %w", err)
 	}
@@ -33,11 +34,10 @@ func (s *CspRoleService) isManagementRole(roleName, roleArn string) (bool, *mode
 	return false, nil, nil
 }
 
-// GuardNotManagementRole 관리용 Role 이면 CspRoleProtectedError(핸들러는 409)를 돌려준다.
-// action 은 오류 문구에 쓴다 (예: "mapped", "updated", "deleted").
-// CspRole 매핑·등록·수정·삭제와 이후 정책·신뢰 정책 변경 경로에서 같은 함수로 확인한다.
-func (s *CspRoleService) GuardNotManagementRole(roleName, roleArn, action string) error {
-	protected, cfg, err := s.isManagementRole(roleName, roleArn)
+// guardNotManagementRole 관리용 Role 이면 CspRoleProtectedError(핸들러는 409)를 돌려준다.
+// CspRoleService 와 CspPolicyService(attachPolicy·detachPolicy)가 같은 판정을 쓴다.
+func guardNotManagementRole(idpConfigRepo *repository.CspIdpConfigRepository, roleName, roleArn, action string) error {
+	protected, cfg, err := isManagementRole(idpConfigRepo, roleName, roleArn)
 	if err != nil {
 		return err
 	}
@@ -49,6 +49,13 @@ func (s *CspRoleService) GuardNotManagementRole(roleName, roleArn, action string
 		label = roleArn
 	}
 	return &CspRoleProtectedError{Msg: fmt.Sprintf("CSP role %s is the management role of IdP config %d (%s) and cannot be %s", label, cfg.ID, cfg.Name, action)}
+}
+
+// GuardNotManagementRole 관리용 Role 이면 CspRoleProtectedError(핸들러는 409)를 돌려준다.
+// action 은 오류 문구에 쓴다 (예: "mapped", "updated", "deleted").
+// CspRole 매핑·등록·수정·삭제와 이후 정책·신뢰 정책 변경 경로에서 같은 함수로 확인한다.
+func (s *CspRoleService) GuardNotManagementRole(roleName, roleArn, action string) error {
+	return guardNotManagementRole(s.cspIdpConfigRepo, roleName, roleArn, action)
 }
 
 // GuardCspRoleNotManagementRole 저장된 CspRole 레코드 기준으로 확인한다.

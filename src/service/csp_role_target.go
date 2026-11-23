@@ -395,7 +395,7 @@ func (s *CspRoleService) CheckTargetCspRole(req model.CreateCspRoleRequest) CspR
 	out.CspRoleName = name
 	req.CspRoleName = name
 
-	if protected, cfg, err := s.isManagementRole(name, ""); err != nil {
+	if protected, cfg, err := isManagementRole(s.cspIdpConfigRepo, name, ""); err != nil {
 		out.Status, out.Message = TargetCheckError, err.Error()
 		return out
 	} else if protected {

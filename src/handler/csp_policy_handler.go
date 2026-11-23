@@ -227,80 +227,86 @@ func (h *CspPolicyHandler) SyncCspPolicies(c echo.Context) error {
 
 // AttachPolicyToRole godoc
 // @Summary Attach policy to role
-// @Description Attach a CSP policy to a CSP role
+// @Description Attach a CSP policy to a CSP role and apply it in AWS (managed: AttachRolePolicy, inline: PutRolePolicy).
+// @Description If the AWS call fails, the mapping is kept with aws_status=failed and the response is 200 with result=failed and warnings; requesting again re-applies it.
+// @Description Rejected without changes: 400 invalid request (no ARN/document, custom type, account mismatch), 403 forbidden_policy (non mciam-* role or denied policy), 404 role/policy not found, 409 management role. 500 only when the database update fails (the AWS change is reverted).
 // @Tags csp-policies
 // @Accept json
 // @Produce json
 // @Param request body model.AttachPolicyRequest true "Attach Policy Request"
-// @Success 200 {object} map[string]string
+// @Success 200 {object} model.PolicyBindingResult
 // @Failure 400 {object} map[string]string
+// @Failure 403 {object} map[string]string
 // @Failure 404 {object} map[string]string
+// @Failure 409 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/csp-policies/attach [post]
 // @Id attachPolicyToRole
 func (h *CspPolicyHandler) AttachPolicyToRole(c echo.Context) error {
-	var req model.AttachPolicyRequest
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format"})
-	}
-
-	if req.CspRoleID == 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "CSP Role ID is required"})
-	}
-	if req.CspPolicyID == 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "CSP Policy ID is required"})
-	}
-
-	if err := h.cspPolicyService.AttachPolicyToRole(req.CspRoleID, req.CspPolicyID); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to attach policy: %v", err)})
-	}
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "Policy attached successfully"})
+	return h.bindPolicy(c, true)
 }
 
 // DetachPolicyFromRole godoc
 // @Summary Detach policy from role
-// @Description Detach a CSP policy from a CSP role
+// @Description Detach a CSP policy from a CSP role in AWS (managed: DetachRolePolicy, inline: DeleteRolePolicy), then remove the mapping. NoSuchEntity from AWS counts as already detached.
+// @Description If the AWS call fails, the mapping is kept with aws_status=detach_failed and the response is 200 with result=detach_failed and warnings; requesting again retries.
+// @Description Rejected without changes: 400, 403 forbidden_policy (non mciam-* role), 404 (role/policy not found or not attached), 409 management role. 500 only when the database update fails.
 // @Tags csp-policies
 // @Accept json
 // @Produce json
 // @Param request body model.AttachPolicyRequest true "Detach Policy Request"
-// @Success 200 {object} map[string]string
+// @Success 200 {object} model.PolicyBindingResult
 // @Failure 400 {object} map[string]string
+// @Failure 403 {object} map[string]string
 // @Failure 404 {object} map[string]string
+// @Failure 409 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/csp-policies/detach [post]
 // @Id detachPolicyFromRole
 func (h *CspPolicyHandler) DetachPolicyFromRole(c echo.Context) error {
+	return h.bindPolicy(c, false)
+}
+
+func (h *CspPolicyHandler) bindPolicy(c echo.Context, attach bool) error {
 	var req model.AttachPolicyRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format", "errorCode": "invalid_request"})
 	}
-
 	if req.CspRoleID == 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "CSP Role ID is required"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "CSP Role ID is required", "errorCode": "invalid_request"})
 	}
 	if req.CspPolicyID == 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "CSP Policy ID is required"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "CSP Policy ID is required", "errorCode": "invalid_request"})
 	}
 
-	if err := h.cspPolicyService.DetachPolicyFromRole(req.CspRoleID, req.CspPolicyID); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to detach policy: %v", err)})
+	var (
+		result *model.PolicyBindingResult
+		err    error
+	)
+	if attach {
+		result, err = h.cspPolicyService.AttachPolicyToRole(req.CspRoleID, req.CspPolicyID)
+	} else {
+		result, err = h.cspPolicyService.DetachPolicyFromRole(req.CspRoleID, req.CspPolicyID)
 	}
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "Policy detached successfully"})
+	if err != nil {
+		if be, ok := service.AsPolicyBindingError(err); ok {
+			return c.JSON(be.Status, map[string]string{"error": be.Msg, "errorCode": be.Code})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error(), "errorCode": "db_error"})
+	}
+	return c.JSON(http.StatusOK, result)
 }
 
 // GetRolePolicies godoc
 // @Summary Get policies attached to role
-// @Description Get list of policies attached to a CSP role
+// @Description Get list of policies attached to a CSP role, with the AWS state of each mapping (aws_status: applied | failed | detach_failed, empty for mappings made before AWS was applied; last_error; applied_at)
 // @Tags csp-policies
 // @Accept json
 // @Produce json
 // @Param roleId path string true "Role ID"
-// @Success 200 {array} model.CspPolicy
+// @Success 200 {array} model.CspRolePolicy
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
@@ -312,13 +318,9 @@ func (h *CspPolicyHandler) GetRolePolicies(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid role ID"})
 	}
 
-	policies, err := h.cspPolicyService.GetPoliciesByRoleID(roleID)
+	policies, err := h.cspPolicyService.GetRolePoliciesWithStatus(roleID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to get policies: %v", err)})
-	}
-
-	if policies == nil {
-		policies = []*model.CspPolicy{}
 	}
 
 	return c.JSON(http.StatusOK, policies)
