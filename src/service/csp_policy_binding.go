@@ -214,8 +214,8 @@ func (s *CspPolicyService) prepareBinding(roleID, policyID uint, attach bool) (*
 	}
 	// TECH-049 (c): IAM 이 관리하는 mciam-* Role 에만 쓴다
 	if !strings.HasPrefix(role.Name, constants.CspRoleNamePrefix) {
-		return nil, bindingErr(http.StatusForbidden, "forbidden_policy", "CSP role %s is not an IAM-managed role (%s*); policies can only be %s on %s* roles",
-			role.Name, constants.CspRoleNamePrefix, strings.TrimPrefix(action, "changed by "), constants.CspRoleNamePrefix)
+		return nil, bindingErr(http.StatusForbidden, "forbidden_policy", "CSP role %s is not an IAM-managed role; %s is only allowed on %s* roles",
+			role.Name, strings.TrimPrefix(action, "changed by "), constants.CspRoleNamePrefix)
 	}
 
 	target := &policyBindingTarget{role: role, policy: policy, mapping: mapping}
