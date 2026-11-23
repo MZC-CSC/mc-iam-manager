@@ -1736,7 +1736,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Attach a CSP policy to a CSP role",
+                "description": "Attach a CSP policy to a CSP role and apply it in AWS (managed: AttachRolePolicy, inline: PutRolePolicy).\nIf the AWS call fails, the mapping is kept with aws_status=failed and the response is 200 with result=failed and warnings; requesting again re-applies it.\nRejected without changes: 400 invalid request (no ARN/document, custom type, account mismatch), 403 forbidden_policy (non mciam-* role or denied policy), 404 role/policy not found, 409 management role. 500 only when the database update fails (the AWS change is reverted).",
                 "consumes": [
                     "application/json"
                 ],
@@ -1763,10 +1763,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/model.PolicyBindingResult"
                         }
                     },
                     "400": {
@@ -1778,8 +1775,26 @@
                             }
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1806,7 +1821,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Detach a CSP policy from a CSP role",
+                "description": "Detach a CSP policy from a CSP role in AWS (managed: DetachRolePolicy, inline: DeleteRolePolicy), then remove the mapping. NoSuchEntity from AWS counts as already detached.\nIf the AWS call fails, the mapping is kept with aws_status=detach_failed and the response is 200 with result=detach_failed and warnings; requesting again retries.\nRejected without changes: 400, 403 forbidden_policy (non mciam-* role), 404 (role/policy not found or not attached), 409 management role. 500 only when the database update fails.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1833,10 +1848,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/model.PolicyBindingResult"
                         }
                     },
                     "400": {
@@ -1848,8 +1860,26 @@
                             }
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2190,7 +2220,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get list of policies attached to a CSP role",
+                "description": "Get list of policies attached to a CSP role, with the AWS state of each mapping (aws_status: applied | failed | detach_failed, empty for mappings made before AWS was applied; last_error; applied_at)",
                 "consumes": [
                     "application/json"
                 ],
@@ -2217,7 +2247,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/model.CspPolicy"
+                                "$ref": "#/definitions/model.CspRolePolicy"
                             }
                         }
                     },
@@ -14401,6 +14431,56 @@
                 }
             }
         },
+        "model.CspRolePolicy": {
+            "type": "object",
+            "properties": {
+                "applied_at": {
+                    "type": "string"
+                },
+                "aws_status": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "csp_account": {
+                    "$ref": "#/definitions/model.CspAccount"
+                },
+                "csp_account_id": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "policy_arn": {
+                    "type": "string"
+                },
+                "policy_doc": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "policy_type": {
+                    "description": "inline, managed, custom",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.PolicyType"
+                        }
+                    ]
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "model.CspValidationRequest": {
             "type": "object",
             "properties": {
@@ -15033,6 +15113,38 @@
                 },
                 "role_name": {
                     "type": "string"
+                }
+            }
+        },
+        "model.PolicyBindingResult": {
+            "type": "object",
+            "properties": {
+                "awsStatus": {
+                    "description": "남은 매핑 행의 상태 (detached 면 비어 있음)",
+                    "type": "string"
+                },
+                "cspPolicyId": {
+                    "type": "integer"
+                },
+                "cspRoleId": {
+                    "type": "integer"
+                },
+                "errorCode": {
+                    "description": "failed·detach_failed: csp_error",
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "result": {
+                    "description": "applied | failed | detached | detach_failed",
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
