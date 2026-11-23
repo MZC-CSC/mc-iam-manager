@@ -86,3 +86,52 @@ func TestPolicyBindingHandler_RejectionStatus(t *testing.T) {
 	require.NoError(t, db.Model(&model.CspRolePolicyMapping{}).Count(&n).Error)
 	assert.Zero(t, n)
 }
+
+// 정책 정의 API 의 상태 코드와 errorCode (AWS 를 부르지 않는 경로)
+func TestPolicyDefinitionHandler_Status(t *testing.T) {
+	db := setupPolicyBindingTestDB(t)
+	cfg := seedAwsManagementConfig(t, db, "t052", "mciam-t052-mgmt")
+	h := NewCspPolicyHandler(db)
+	role := &model.CspRole{Name: "mciam-t052-target", CspType: "aws", Status: "created", CspIdpConfigID: &cfg.ID}
+	require.NoError(t, db.Create(role).Error)
+
+	do := func(method, path string, params map[string]string, fn func(echo.Context) error, body string) (int, map[string]interface{}) {
+		e := echo.New()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		for k, v := range params {
+			c.SetParamNames(k)
+			c.SetParamValues(v)
+		}
+		require.NoError(t, fn(c))
+		var out map[string]interface{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	acct := cfg.CspAccountID
+	code, out := do(http.MethodPost, "/api/csp-policies", nil, h.CreateCspPolicy, fmt.Sprintf(`{"name":"x","csp_account_id":%d,"policy_type":"managed","policy_arn":"arn:aws:iam::111111111111:policy/x"}`, acct))
+	assert.Equal(t, http.StatusBadRequest, code, "%v", out)
+	assert.Equal(t, "invalid_request", out["errorCode"])
+	code, out = do(http.MethodPost, "/api/csp-policies", nil, h.CreateCspPolicy, fmt.Sprintf(`{"name":"mciam-t052-i","csp_account_id":%d,"policy_type":"inline","policy_doc":{"Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}}`, acct))
+	assert.Equal(t, http.StatusForbidden, code, "%v", out)
+	code, out = do(http.MethodPost, "/api/csp-policies", nil, h.CreateCspPolicy, fmt.Sprintf(`{"name":"mciam-t052-i","csp_account_id":%d,"policy_type":"inline","policy_doc":{"Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"}]}}`, acct))
+	require.Equal(t, http.StatusCreated, code, "%v", out)
+	id := fmt.Sprintf("%v", out["id"])
+
+	code, out = do(http.MethodPut, "/api/csp-policies/id/999", map[string]string{"policyId": "999"}, h.UpdateCspPolicy, `{"description":"x"}`)
+	assert.Equal(t, http.StatusNotFound, code, "%v", out)
+	code, out = do(http.MethodPut, "/api/csp-policies/id/"+id, map[string]string{"policyId": id}, h.UpdateCspPolicy, `{"description":"label"}`)
+	assert.Equal(t, http.StatusOK, code, "%v", out)
+	assert.Equal(t, "label", out["description"], "정책 필드를 펼쳐서 돌려준다")
+	assert.NotNil(t, out["warnings"])
+
+	var policy model.CspPolicy
+	require.NoError(t, db.Where("name = ?", "mciam-t052-i").First(&policy).Error)
+	require.NoError(t, db.Create(&model.CspRolePolicyMapping{CspRoleID: role.ID, CspPolicyID: policy.ID}).Error)
+	code, out = do(http.MethodDelete, "/api/csp-policies/id/"+id, map[string]string{"policyId": id}, h.DeleteCspPolicy, ``)
+	assert.Equal(t, http.StatusConflict, code, "%v", out)
+	code, out = do(http.MethodPut, "/api/csp-policies/id/"+id, map[string]string{"policyId": id}, h.UpdateCspPolicy, `{"name":"mciam-t052-renamed"}`)
+	assert.Equal(t, http.StatusConflict, code, "%v", out)
+}

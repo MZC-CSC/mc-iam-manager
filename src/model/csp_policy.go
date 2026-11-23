@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"time"
 )
 
@@ -8,9 +9,10 @@ import (
 type PolicyType string
 
 const (
-	PolicyTypeInline  PolicyType = "inline"  // 인라인 정책 (역할에 직접 포함)
-	PolicyTypeManaged PolicyType = "managed" // 관리형 정책 (독립 정책)
-	PolicyTypeCustom  PolicyType = "custom"  // 사용자 정의 정책
+	// 정책 타입 (IAM-TECH-052)
+	PolicyTypeInline  PolicyType = "inline"  // 인라인 정책: 문서를 Role 1개 안에 사본으로 저장 (Role 1개 전용)
+	PolicyTypeManaged PolicyType = "managed" // AWS 관리형 정책(arn:aws:iam::aws:policy/...): 연결·해제만, 문서 수정 불가
+	PolicyTypeCustom  PolicyType = "custom"  // 고객 관리형 정책(계정의 독립 정책): 여러 Role 공유, IAM 이 생성·수정·삭제 (mciam-* 만)
 )
 
 // CspPolicy CSP 정책 모델
@@ -126,9 +128,31 @@ func (p *CspPolicy) IsManaged() bool {
 	return p.PolicyType == PolicyTypeManaged
 }
 
-// IsCustom 사용자 정의 정책인지 확인
+// IsCustom 고객 관리형 정책인지 확인
 func (p *CspPolicy) IsCustom() bool {
 	return p.PolicyType == PolicyTypeCustom
+}
+
+// IsAwsManagedPolicyArn AWS 가 제공하는 관리형 정책 ARN 인지 (arn:<partition>:iam::aws:policy/...)
+func IsAwsManagedPolicyArn(arn string) bool {
+	parts := strings.SplitN(arn, ":", 6)
+	return len(parts) == 6 && parts[0] == "arn" && strings.HasPrefix(parts[1], "aws") && parts[2] == "iam" &&
+		parts[4] == "aws" && strings.HasPrefix(parts[5], "policy/")
+}
+
+// PolicyTypeForArn ARN 으로 managed(AWS 관리형) 와 custom(고객 관리형) 을 구분한다
+func PolicyTypeForArn(arn string) PolicyType {
+	if IsAwsManagedPolicyArn(arn) {
+		return PolicyTypeManaged
+	}
+	return PolicyTypeCustom
+}
+
+// CspPolicyChangeResult 정책 정의 수정 결과. inline 문서 수정은 연결된 Role 반영 결과를 함께 돌려준다.
+type CspPolicyChangeResult struct {
+	*CspPolicy
+	BindingResults []*PolicyBindingResult `json:"bindingResults"`
+	Warnings       []string               `json:"warnings"`
 }
 
 // GetPolicyVersion 정책 버전 반환 (AWS)

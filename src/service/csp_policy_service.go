@@ -39,44 +39,6 @@ func NewCspPolicyService(db *gorm.DB, cspIdpConfigService *CspIdpConfigService) 
 	}
 }
 
-// CreateCspPolicy CSP 정책 생성
-func (s *CspPolicyService) CreateCspPolicy(req *model.CreateCspPolicyRequest) (*model.CspPolicy, error) {
-	// CSP 계정 존재 확인
-	account, err := s.cspAccountRepo.GetByID(req.CspAccountID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get CSP account: %w", err)
-	}
-	if account == nil {
-		return nil, fmt.Errorf("CSP account not found with ID: %d", req.CspAccountID)
-	}
-
-	// 이름 중복 확인
-	exists, err := s.cspPolicyRepo.ExistsByNameAndAccountID(req.Name, req.CspAccountID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check policy existence: %w", err)
-	}
-	if exists {
-		return nil, fmt.Errorf("policy with name '%s' already exists for this account", req.Name)
-	}
-
-	// 정책 생성
-	policy := &model.CspPolicy{
-		Name:         req.Name,
-		CspAccountID: req.CspAccountID,
-		PolicyType:   req.PolicyType,
-		PolicyArn:    req.PolicyArn,
-		PolicyDoc:    req.PolicyDoc,
-		Description:  req.Description,
-	}
-
-	if err := s.cspPolicyRepo.Create(policy); err != nil {
-		return nil, fmt.Errorf("failed to create policy: %w", err)
-	}
-
-	log.Printf("Created CSP policy: %s (type: %s)", policy.Name, policy.PolicyType)
-	return policy, nil
-}
-
 // GetCspPolicyByID ID로 CSP 정책 조회
 func (s *CspPolicyService) GetCspPolicyByID(id uint) (*model.CspPolicy, error) {
 	policy, err := s.cspPolicyRepo.GetByID(id)
@@ -96,77 +58,6 @@ func (s *CspPolicyService) ListCspPolicies(filter *model.CspPolicyFilter) ([]*mo
 		return nil, fmt.Errorf("failed to list policies: %w", err)
 	}
 	return policies, nil
-}
-
-// UpdateCspPolicy CSP 정책 수정
-func (s *CspPolicyService) UpdateCspPolicy(id uint, req *model.UpdateCspPolicyRequest) (*model.CspPolicy, error) {
-	// 기존 정책 조회
-	policy, err := s.cspPolicyRepo.GetByID(id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get policy: %w", err)
-	}
-	if policy == nil {
-		return nil, fmt.Errorf("policy not found with ID: %d", id)
-	}
-
-	// 필드 업데이트
-	if req.Name != "" {
-		// 이름 변경 시 중복 확인
-		if req.Name != policy.Name {
-			exists, err := s.cspPolicyRepo.ExistsByNameAndAccountID(req.Name, policy.CspAccountID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to check policy existence: %w", err)
-			}
-			if exists {
-				return nil, fmt.Errorf("policy with name '%s' already exists", req.Name)
-			}
-		}
-		policy.Name = req.Name
-	}
-	if req.PolicyArn != "" {
-		policy.PolicyArn = req.PolicyArn
-	}
-	if req.PolicyDoc != nil {
-		policy.PolicyDoc = req.PolicyDoc
-	}
-	if req.Description != "" {
-		policy.Description = req.Description
-	}
-
-	if err := s.cspPolicyRepo.Update(policy); err != nil {
-		return nil, fmt.Errorf("failed to update policy: %w", err)
-	}
-
-	log.Printf("Updated CSP policy: %s (ID: %d)", policy.Name, policy.ID)
-	return policy, nil
-}
-
-// DeleteCspPolicy CSP 정책 삭제
-func (s *CspPolicyService) DeleteCspPolicy(id uint) error {
-	// 정책 존재 확인
-	exists, err := s.cspPolicyRepo.ExistsByID(id)
-	if err != nil {
-		return fmt.Errorf("failed to check policy existence: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("policy not found with ID: %d", id)
-	}
-
-	// 연결된 역할 확인
-	roles, err := s.cspPolicyRepo.GetRolesByPolicyID(id)
-	if err != nil {
-		return fmt.Errorf("failed to get roles by policy: %w", err)
-	}
-	if len(roles) > 0 {
-		return fmt.Errorf("cannot delete policy: %d roles are attached", len(roles))
-	}
-
-	if err := s.cspPolicyRepo.Delete(id); err != nil {
-		return fmt.Errorf("failed to delete policy: %w", err)
-	}
-
-	log.Printf("Deleted CSP policy with ID: %d", id)
-	return nil
 }
 
 // GetPoliciesByRoleID 역할에 연결된 정책 목록 조회
@@ -266,17 +157,30 @@ func (s *CspPolicyService) syncAwsPolicies(ctx context.Context, account *model.C
 		}
 
 		for _, awsPolicy := range page.Policies {
-			// 기존 정책 확인
-			existingPolicy, _ := s.cspPolicyRepo.GetByArn(*awsPolicy.Arn)
+			arn := aws.ToString(awsPolicy.Arn)
+			policyType := model.PolicyTypeForArn(arn)
+			// 고객 관리형은 IAM 이 관리하는 mciam-* 만 가져온다 (IAM 밖 서비스가 쓰는 정책은 들이지 않는다, IAM-TECH-052)
+			if policyType == model.PolicyTypeCustom && !isIamOwnedPolicyName(aws.ToString(awsPolicy.PolicyName)) {
+				continue
+			}
+			// 기존 정책 확인 (계정 조건 포함, D4)
+			existingPolicy, err := s.cspPolicyRepo.GetByArnAndAccountID(arn, account.ID)
+			if err != nil {
+				log.Printf("Failed to look up policy %s: %v", arn, err)
+				continue
+			}
 			if existingPolicy != nil {
-				// 업데이트
-				existingPolicy.Name = *awsPolicy.PolicyName
+				values := map[string]interface{}{"name": aws.ToString(awsPolicy.PolicyName), "policy_type": policyType}
 				if awsPolicy.Description != nil {
-					existingPolicy.Description = *awsPolicy.Description
+					values["description"] = *awsPolicy.Description
 				}
-				if err := s.cspPolicyRepo.Update(existingPolicy); err != nil {
+				if err := s.cspPolicyRepo.UpdatePolicyFields(existingPolicy.ID, values); err != nil {
 					log.Printf("Failed to update policy %s: %v", *awsPolicy.PolicyName, err)
 					continue
+				}
+				existingPolicy.Name, existingPolicy.PolicyType = aws.ToString(awsPolicy.PolicyName), policyType
+				if awsPolicy.Description != nil {
+					existingPolicy.Description = *awsPolicy.Description
 				}
 				syncedPolicies = append(syncedPolicies, existingPolicy)
 			} else {
@@ -284,8 +188,8 @@ func (s *CspPolicyService) syncAwsPolicies(ctx context.Context, account *model.C
 				newPolicy := &model.CspPolicy{
 					Name:         *awsPolicy.PolicyName,
 					CspAccountID: account.ID,
-					PolicyType:   model.PolicyTypeManaged,
-					PolicyArn:    *awsPolicy.Arn,
+					PolicyType:   policyType,
+					PolicyArn:    arn,
 				}
 				if awsPolicy.Description != nil {
 					newPolicy.Description = *awsPolicy.Description
@@ -318,8 +222,8 @@ func (s *CspPolicyService) GetPolicyDocument(ctx context.Context, policyID uint)
 		return policy.PolicyDoc, nil
 	}
 
-	// 관리형 정책이고 ARN이 있으면 CSP에서 조회
-	if policy.PolicyType == model.PolicyTypeManaged && policy.PolicyArn != "" {
+	// 관리형(AWS·고객) 정책이고 ARN이 있으면 CSP에서 조회
+	if (policy.PolicyType == model.PolicyTypeManaged || policy.PolicyType == model.PolicyTypeCustom) && policy.PolicyArn != "" {
 		account, err := s.cspAccountRepo.GetByID(policy.CspAccountID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get CSP account: %w", err)

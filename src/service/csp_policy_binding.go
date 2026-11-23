@@ -28,12 +28,19 @@ import (
 //     아래 계층(권한 정책) 실패가 위 계층(대상 CSP Role·Master Role)을 실패시키지 않는다. 같은 요청을 다시 하면 다시 맞춘다.
 //   - DB 쓰기가 실패하면 500 이다. 이때 AWS 는 반대 호출로 되돌린다.
 
-// awsPolicyAPI 권한 정책 연결·해제에 쓰는 AWS IAM 호출. *iam.Client 가 만족한다 (테스트는 fake).
+// awsPolicyAPI 권한 정책 연결·해제와 고객 관리형 정책 정의(생성·버전·삭제)에 쓰는 AWS IAM 호출.
+// *iam.Client 가 만족한다 (테스트는 fake).
 type awsPolicyAPI interface {
 	AttachRolePolicy(ctx context.Context, params *iam.AttachRolePolicyInput, optFns ...func(*iam.Options)) (*iam.AttachRolePolicyOutput, error)
 	DetachRolePolicy(ctx context.Context, params *iam.DetachRolePolicyInput, optFns ...func(*iam.Options)) (*iam.DetachRolePolicyOutput, error)
 	PutRolePolicy(ctx context.Context, params *iam.PutRolePolicyInput, optFns ...func(*iam.Options)) (*iam.PutRolePolicyOutput, error)
 	DeleteRolePolicy(ctx context.Context, params *iam.DeleteRolePolicyInput, optFns ...func(*iam.Options)) (*iam.DeleteRolePolicyOutput, error)
+	GetPolicy(ctx context.Context, params *iam.GetPolicyInput, optFns ...func(*iam.Options)) (*iam.GetPolicyOutput, error)
+	CreatePolicy(ctx context.Context, params *iam.CreatePolicyInput, optFns ...func(*iam.Options)) (*iam.CreatePolicyOutput, error)
+	CreatePolicyVersion(ctx context.Context, params *iam.CreatePolicyVersionInput, optFns ...func(*iam.Options)) (*iam.CreatePolicyVersionOutput, error)
+	ListPolicyVersions(ctx context.Context, params *iam.ListPolicyVersionsInput, optFns ...func(*iam.Options)) (*iam.ListPolicyVersionsOutput, error)
+	DeletePolicyVersion(ctx context.Context, params *iam.DeletePolicyVersionInput, optFns ...func(*iam.Options)) (*iam.DeletePolicyVersionOutput, error)
+	DeletePolicy(ctx context.Context, params *iam.DeletePolicyInput, optFns ...func(*iam.Options)) (*iam.DeletePolicyOutput, error)
 }
 
 // 관리용 자격증명 세션 이름 (CloudTrail 에서 IAM 쓰기 주체로 보인다)
@@ -74,6 +81,7 @@ type policyBindingTarget struct {
 	idpConfig *model.CspIdpConfig
 	mapping   *model.CspRolePolicyMapping // 기존 매핑 행 (없으면 nil)
 	inlineDoc string                      // inline 정책 문서 JSON
+	dbOnly    bool                        // AWS 에 반영된 적이 없는 정의(ARN 없는 custom): detach 는 매핑만 지운다
 }
 
 // AttachPolicyToRole 역할에 권한 정책을 연결하고 AWS 에 반영한다.
@@ -132,9 +140,9 @@ func (s *CspPolicyService) DetachPolicyFromRole(roleID, policyID uint) (*model.P
 	result := &model.PolicyBindingResult{CspRoleID: roleID, CspPolicyID: policyID, Warnings: []string{}}
 
 	removed := false // AWS 에서 실제로 지웠는지 (보상 대상)
-	if target.policy.PolicyType == model.PolicyTypeCustom {
-		// custom 은 AWS 에 반영한 적이 없다 (attach 400). DB 행만 지운다.
-		log.Printf("[WARN] detach custom policy %d from role %d: custom type is not applied to AWS, removing the mapping only", policyID, roleID)
+	if target.dbOnly {
+		// ARN 없는 custom(이전 정의)은 AWS 에 반영된 적이 없다. DB 행만 지운다.
+		log.Printf("[WARN] detach policy %d from role %d: policy has no AWS entity, removing the mapping only", policyID, roleID)
 	} else if awsErr := s.removePolicy(ctx, target); awsErr != nil {
 		if !isAwsNoSuchEntity(awsErr) {
 			msg := fmt.Sprintf("AWS detach of policy %s from role %s failed: %v", target.policy.Name, target.role.Name, awsErr)
@@ -228,6 +236,16 @@ func (s *CspPolicyService) prepareBinding(roleID, policyID uint, attach bool) (*
 			return nil, bindingErr(http.StatusForbidden, "forbidden_policy", "policy %s cannot be attached through IAM (privilege escalation guard)", policy.PolicyArn)
 		}
 	case model.PolicyTypeInline:
+		if attach {
+			// inline 은 Role 1개 전용이다. 여러 Role 이 같은 권한을 쓰면 custom(고객 관리형)을 쓴다 (IAM-TECH-052 D1)
+			others, err := s.otherRolesAttached(policyID, roleID)
+			if err != nil {
+				return nil, bindingErr(http.StatusInternalServerError, "db_error", "%v", err)
+			}
+			if others > 0 {
+				return nil, bindingErr(http.StatusBadRequest, "invalid_request", "inline policy %s is already attached to another CSP role; inline policies belong to one role, use a custom (customer managed) policy to share permissions", policy.Name)
+			}
+		}
 		if !awsInlinePolicyNamePattern.MatchString(policy.Name) {
 			return nil, bindingErr(http.StatusBadRequest, "invalid_request", "invalid AWS inline policy name %q: 1-128 characters of letters, digits and +=,.@_-", policy.Name)
 		}
@@ -245,10 +263,14 @@ func (s *CspPolicyService) prepareBinding(roleID, policyID uint, attach bool) (*
 			target.inlineDoc = string(doc)
 		}
 	case model.PolicyTypeCustom:
-		if attach {
-			return nil, bindingErr(http.StatusBadRequest, "invalid_request", "custom policy type is not supported yet")
+		// 고객 관리형: ARN 으로 연결·해제한다. 문서 거부 검사는 정의 생성·수정 때 한다 (IAM-TECH-052)
+		if strings.TrimSpace(policy.PolicyArn) == "" {
+			if attach {
+				return nil, bindingErr(http.StatusBadRequest, "invalid_request", "custom policy %s has no policy_arn; create it again so that IAM creates it in AWS", policy.Name)
+			}
+			target.dbOnly = true
+			return target, nil
 		}
-		return target, nil // detach 는 DB 행만 지운다 (AWS 에 반영한 적 없음)
 	default:
 		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "unsupported policy type %q", policy.PolicyType)
 	}
@@ -349,7 +371,7 @@ func (s *CspPolicyService) applyPolicy(ctx context.Context, t *policyBindingTarg
 		return err
 	}
 	switch t.policy.PolicyType {
-	case model.PolicyTypeManaged:
+	case model.PolicyTypeManaged, model.PolicyTypeCustom:
 		_, err = api.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{RoleName: aws.String(t.role.Name), PolicyArn: aws.String(t.policy.PolicyArn)})
 	case model.PolicyTypeInline:
 		doc := t.inlineDoc
@@ -372,7 +394,7 @@ func (s *CspPolicyService) removePolicy(ctx context.Context, t *policyBindingTar
 		return err
 	}
 	switch t.policy.PolicyType {
-	case model.PolicyTypeManaged:
+	case model.PolicyTypeManaged, model.PolicyTypeCustom:
 		_, err = api.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{RoleName: aws.String(t.role.Name), PolicyArn: aws.String(t.policy.PolicyArn)})
 	case model.PolicyTypeInline:
 		_, err = api.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{RoleName: aws.String(t.role.Name), PolicyName: aws.String(t.policy.Name)})
@@ -432,4 +454,19 @@ func (s *CspPolicyService) GetRolePoliciesWithStatus(roleID uint) ([]*model.CspR
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+// otherRolesAttached 이 정책이 roleID 가 아닌 Role 에 연결된 매핑 수
+func (s *CspPolicyService) otherRolesAttached(policyID, roleID uint) (int, error) {
+	mappings, err := s.cspPolicyRepo.ListMappingsByPolicyID(policyID)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, m := range mappings {
+		if m.CspRoleID != roleID {
+			n++
+		}
+	}
+	return n, nil
 }
