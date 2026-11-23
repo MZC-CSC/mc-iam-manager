@@ -21,7 +21,10 @@ type CspPolicyService struct {
 	cspPolicyRepo       *repository.CspPolicyRepository
 	cspAccountRepo      *repository.CspAccountRepository
 	cspRoleRepo         *repository.CspRoleRepository
+	cspIdpConfigRepo    *repository.CspIdpConfigRepository
 	cspIdpConfigService *CspIdpConfigService
+	// awsPolicyClient 테스트에서 AWS IAM 호출을 바꿔 끼울 때만 쓴다 (nil 이면 소속 Config 로 assume 한 실제 클라이언트)
+	awsPolicyClient func(cfg *model.CspIdpConfig) (awsPolicyAPI, error)
 }
 
 // NewCspPolicyService 새 CspPolicyService 인스턴스 생성
@@ -31,6 +34,7 @@ func NewCspPolicyService(db *gorm.DB, cspIdpConfigService *CspIdpConfigService) 
 		cspPolicyRepo:       repository.NewCspPolicyRepository(db),
 		cspAccountRepo:      repository.NewCspAccountRepository(db),
 		cspRoleRepo:         repository.NewCspRoleRepository(db),
+		cspIdpConfigRepo:    repository.NewCspIdpConfigRepository(db),
 		cspIdpConfigService: cspIdpConfigService,
 	}
 }
@@ -162,62 +166,6 @@ func (s *CspPolicyService) DeleteCspPolicy(id uint) error {
 	}
 
 	log.Printf("Deleted CSP policy with ID: %d", id)
-	return nil
-}
-
-// AttachPolicyToRole 역할에 정책 연결
-func (s *CspPolicyService) AttachPolicyToRole(roleID, policyID uint) error {
-	// 역할 존재 확인
-	roleExists, err := s.cspRoleRepo.ExistsCspRoleByID(roleID)
-	if err != nil {
-		return fmt.Errorf("failed to check role existence: %w", err)
-	}
-	if !roleExists {
-		return fmt.Errorf("CSP role not found with ID: %d", roleID)
-	}
-
-	// 정책 존재 확인
-	policyExists, err := s.cspPolicyRepo.ExistsByID(policyID)
-	if err != nil {
-		return fmt.Errorf("failed to check policy existence: %w", err)
-	}
-	if !policyExists {
-		return fmt.Errorf("CSP policy not found with ID: %d", policyID)
-	}
-
-	// 이미 연결되어 있는지 확인
-	attached, err := s.cspPolicyRepo.IsPolicyAttachedToRole(roleID, policyID)
-	if err != nil {
-		return fmt.Errorf("failed to check policy attachment: %w", err)
-	}
-	if attached {
-		return fmt.Errorf("policy is already attached to the role")
-	}
-
-	if err := s.cspPolicyRepo.AttachPolicyToRole(roleID, policyID); err != nil {
-		return fmt.Errorf("failed to attach policy to role: %w", err)
-	}
-
-	log.Printf("Attached policy %d to role %d", policyID, roleID)
-	return nil
-}
-
-// DetachPolicyFromRole 역할에서 정책 분리
-func (s *CspPolicyService) DetachPolicyFromRole(roleID, policyID uint) error {
-	// 연결 여부 확인
-	attached, err := s.cspPolicyRepo.IsPolicyAttachedToRole(roleID, policyID)
-	if err != nil {
-		return fmt.Errorf("failed to check policy attachment: %w", err)
-	}
-	if !attached {
-		return fmt.Errorf("policy is not attached to the role")
-	}
-
-	if err := s.cspPolicyRepo.DetachPolicyFromRole(roleID, policyID); err != nil {
-		return fmt.Errorf("failed to detach policy from role: %w", err)
-	}
-
-	log.Printf("Detached policy %d from role %d", policyID, roleID)
 	return nil
 }
 
