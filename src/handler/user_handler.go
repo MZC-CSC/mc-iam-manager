@@ -908,17 +908,21 @@ func (h *UserHandler) ListUserProjectsByWorkspace(c echo.Context) error {
 
 	// 1-0. platformAdmin이면 소속 검증을 건너뛴다 (ListUserWorkspaces와 동일한 정책)
 	if !checkRoleFromContext(c, []string{"platformAdmin"}) {
-		// 1. 사용자가 실제로 해당 workspace에 소속되어 있는지 먼저 검증한다.
-		//    (WorkspaceID + UserID 조건을 함께 걸어야 하므로 project 정보가 없는 ListWorkspaces를 사용한다.
-		//     FindWorkspacesProjects는 WorkspaceID가 있으면 UserID를 확인하기 전에 바로 return해버려서 사용할 수 없다.)
-		memberWorkspaces, err := h.workspaceService.ListWorkspaces(&model.WorkspaceFilterRequest{
-			WorkspaceID: fmt.Sprintf("%d", workspaceIdInt),
-			UserID:      fmt.Sprintf("%d", localUserID),
-		})
+		// 1. 사용자가 해당 workspace에 접근 권한이 있는지 먼저 검증한다.
+		//    직접 배정(mcmp_user_workspace_roles)만 보면 그룹 상속 역할로 접근하는 사용자가 403이 되므로,
+		//    /users/me/workspace-roles 와 같은 유효 역할(직접 배정 + 그룹 상속) 기준으로 판정한다. (BAR-2300)
+		effectiveRoles, err := h.roleService.GetEffectiveWorkspaceRoles(localUserID)
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to verify workspace membership: %v", err)})
 		}
-		if len(memberWorkspaces) == 0 {
+		isMember := false
+		for _, r := range effectiveRoles {
+			if r.WorkspaceID == workspaceIdInt {
+				isMember = true
+				break
+			}
+		}
+		if !isMember {
 			return c.JSON(http.StatusForbidden, map[string]string{"error": "user does not belong to the requested workspace"})
 		}
 	}
