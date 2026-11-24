@@ -279,6 +279,9 @@ func (s *CspPolicyService) getAwsPolicyDocument(ctx context.Context, account *mo
 	}
 	policyResult, err := iamClient.GetPolicy(ctx, getPolicyInput)
 	if err != nil {
+		if isAwsNoSuchEntity(err) {
+			return nil, bindingErr(http.StatusNotFound, "not_found", "policy %s does not exist in AWS", policyArn)
+		}
 		return nil, bindingErr(http.StatusBadGateway, "csp_error", "failed to get policy: %v", err)
 	}
 
