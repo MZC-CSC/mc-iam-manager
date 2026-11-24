@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -46,7 +47,7 @@ func (s *CspPolicyService) GetCspPolicyByID(id uint) (*model.CspPolicy, error) {
 		return nil, fmt.Errorf("failed to get policy: %w", err)
 	}
 	if policy == nil {
-		return nil, fmt.Errorf("policy not found with ID: %d", id)
+		return nil, bindingErr(http.StatusNotFound, "not_found", "policy not found with ID: %d", id)
 	}
 	return policy, nil
 }
@@ -77,18 +78,18 @@ func (s *CspPolicyService) SyncPoliciesFromCloud(ctx context.Context, req *model
 		return nil, fmt.Errorf("failed to get CSP account: %w", err)
 	}
 	if account == nil {
-		return nil, fmt.Errorf("CSP account not found with ID: %d", req.CspAccountID)
+		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "CSP account not found with ID: %d", req.CspAccountID)
 	}
 
 	switch account.CspType {
 	case "aws":
 		return s.syncAwsPolicies(ctx, account, req.PolicyScope)
 	case "gcp":
-		return nil, fmt.Errorf("GCP policy sync not implemented yet")
+		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "GCP policy sync not implemented yet")
 	case "azure":
-		return nil, fmt.Errorf("Azure policy sync not implemented yet")
+		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "Azure policy sync not implemented yet")
 	default:
-		return nil, fmt.Errorf("unsupported CSP type: %s", account.CspType)
+		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "unsupported CSP type: %s", account.CspType)
 	}
 }
 
@@ -100,7 +101,7 @@ func (s *CspPolicyService) syncAwsPolicies(ctx context.Context, account *model.C
 		return nil, fmt.Errorf("failed to get IDP configs: %w", err)
 	}
 	if len(idpConfigs) == 0 {
-		return nil, fmt.Errorf("no active IDP config found for account")
+		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "no active IDP config found for account")
 	}
 
 	// 첫 번째 활성 IDP 설정 사용
@@ -112,7 +113,7 @@ func (s *CspPolicyService) syncAwsPolicies(ctx context.Context, account *model.C
 		"mciam-policy-sync",
 		3600)
 	if err != nil {
-		return nil, fmt.Errorf("failed to assume role: %w", err)
+		return nil, bindingErr(http.StatusBadGateway, "csp_error", "failed to assume role: %v", err)
 	}
 
 	// AWS IAM 클라이언트 생성
@@ -153,7 +154,7 @@ func (s *CspPolicyService) syncAwsPolicies(ctx context.Context, account *model.C
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list AWS policies: %w", err)
+			return nil, bindingErr(http.StatusBadGateway, "csp_error", "failed to list AWS policies: %v", err)
 		}
 
 		for _, awsPolicy := range page.Policies {
@@ -214,7 +215,7 @@ func (s *CspPolicyService) GetPolicyDocument(ctx context.Context, policyID uint)
 		return nil, fmt.Errorf("failed to get policy: %w", err)
 	}
 	if policy == nil {
-		return nil, fmt.Errorf("policy not found with ID: %d", policyID)
+		return nil, bindingErr(http.StatusNotFound, "not_found", "policy not found with ID: %d", policyID)
 	}
 
 	// 이미 PolicyDoc가 있으면 반환
@@ -234,7 +235,7 @@ func (s *CspPolicyService) GetPolicyDocument(ctx context.Context, policyID uint)
 		}
 	}
 
-	return nil, fmt.Errorf("policy document not available")
+	return nil, bindingErr(http.StatusNotFound, "not_found", "policy document not available")
 }
 
 // getAwsPolicyDocument AWS에서 정책 문서 조회
@@ -245,7 +246,7 @@ func (s *CspPolicyService) getAwsPolicyDocument(ctx context.Context, account *mo
 		return nil, fmt.Errorf("failed to get IDP configs: %w", err)
 	}
 	if len(idpConfigs) == 0 {
-		return nil, fmt.Errorf("no active IDP config found for account")
+		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "no active IDP config found for account")
 	}
 
 	idpConfig := idpConfigs[0]
@@ -254,7 +255,7 @@ func (s *CspPolicyService) getAwsPolicyDocument(ctx context.Context, account *mo
 		"mciam-policy-get",
 		900)
 	if err != nil {
-		return nil, fmt.Errorf("failed to assume role: %w", err)
+		return nil, bindingErr(http.StatusBadGateway, "csp_error", "failed to assume role: %v", err)
 	}
 
 	// AWS IAM 클라이언트 생성
@@ -278,7 +279,7 @@ func (s *CspPolicyService) getAwsPolicyDocument(ctx context.Context, account *mo
 	}
 	policyResult, err := iamClient.GetPolicy(ctx, getPolicyInput)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get policy: %w", err)
+		return nil, bindingErr(http.StatusBadGateway, "csp_error", "failed to get policy: %v", err)
 	}
 
 	// 정책 버전 문서 조회
@@ -288,7 +289,7 @@ func (s *CspPolicyService) getAwsPolicyDocument(ctx context.Context, account *mo
 	}
 	versionResult, err := iamClient.GetPolicyVersion(ctx, getPolicyVersionInput)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get policy version: %w", err)
+		return nil, bindingErr(http.StatusBadGateway, "csp_error", "failed to get policy version: %v", err)
 	}
 
 	// URL 디코딩 및 JSON 파싱
@@ -300,7 +301,7 @@ func (s *CspPolicyService) getAwsPolicyDocument(ctx context.Context, account *mo
 		}, nil
 	}
 
-	return nil, fmt.Errorf("policy document not found")
+	return nil, bindingErr(http.StatusNotFound, "not_found", "policy document not found")
 }
 
 // GetManagedPoliciesByAccountID 특정 계정의 관리형 정책 목록 조회

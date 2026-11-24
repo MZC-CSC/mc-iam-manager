@@ -122,6 +122,14 @@ func TestPolicyDefinitionHandler_Status(t *testing.T) {
 
 	code, out = do(http.MethodPut, "/api/csp-policies/id/999", map[string]string{"policyId": "999"}, h.UpdateCspPolicy, `{"description":"x"}`)
 	assert.Equal(t, http.StatusNotFound, code, "%v", out)
+	assert.Equal(t, "not_found", out["errorCode"])
+	for _, fn := range []func(echo.Context) error{h.GetCspPolicyByID, h.GetPolicyDocument} {
+		code, out = do(http.MethodGet, "/api/csp-policies/id/999", map[string]string{"policyId": "999"}, fn, ``)
+		assert.Equal(t, http.StatusNotFound, code, "%v", out)
+		assert.Equal(t, "not_found", out["errorCode"])
+	}
+	code, out = do(http.MethodGet, "/api/csp-policies/id/abc", map[string]string{"policyId": "abc"}, h.GetCspPolicyByID, ``)
+	assert.Equal(t, "invalid_request", out["errorCode"])
 	code, out = do(http.MethodPut, "/api/csp-policies/id/"+id, map[string]string{"policyId": id}, h.UpdateCspPolicy, `{"description":"label"}`)
 	assert.Equal(t, http.StatusOK, code, "%v", out)
 	assert.Equal(t, "label", out["description"], "정책 필드를 펼쳐서 돌려준다")

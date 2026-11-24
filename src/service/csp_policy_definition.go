@@ -165,7 +165,15 @@ func (s *CspPolicyService) UpdateCspPolicy(id uint, req *model.UpdateCspPolicyRe
 	if err != nil {
 		return nil, bindingErr(http.StatusInternalServerError, "db_error", "%v", err)
 	}
-	attached := len(mappings) > 0
+	// AWS 에 붙어 있을 수 있는 연결 수. attach 가 AWS 에서 실패한(failed) 연결은 AWS 에 없으므로 빼고 센다 (IAM-BUG-058).
+	// detach_failed 와 상태가 빈 이전 연결은 AWS 에 남아 있을 수 있어 센다.
+	liveMappings := 0
+	for _, m := range mappings {
+		if m.AwsStatus != model.PolicyAwsStatusFailed {
+			liveMappings++
+		}
+	}
+	attached := liveMappings > 0
 	result := &model.CspPolicyChangeResult{BindingResults: []*model.PolicyBindingResult{}, Warnings: []string{}}
 
 	values := map[string]interface{}{}
@@ -175,7 +183,7 @@ func (s *CspPolicyService) UpdateCspPolicy(id uint, req *model.UpdateCspPolicyRe
 		case policy.PolicyType == model.PolicyTypeCustom && policy.PolicyArn != "":
 			return nil, bindingErr(http.StatusBadRequest, "invalid_request", "AWS policies cannot be renamed; create a new custom policy instead")
 		case policy.PolicyType == model.PolicyTypeInline && attached:
-			return nil, bindingErr(http.StatusConflict, "conflict", "inline policy %s is attached to %d CSP role(s); detach it before renaming", policy.Name, len(mappings))
+			return nil, bindingErr(http.StatusConflict, "conflict", "inline policy %s is attached to %d CSP role(s) in AWS; detach it before renaming", policy.Name, liveMappings)
 		case policy.PolicyType == model.PolicyTypeInline && !awsInlinePolicyNamePattern.MatchString(newName):
 			return nil, bindingErr(http.StatusBadRequest, "invalid_request", "invalid AWS inline policy name %q", newName)
 		}
@@ -193,7 +201,7 @@ func (s *CspPolicyService) UpdateCspPolicy(id uint, req *model.UpdateCspPolicyRe
 	if newArn != "" && newArn != policy.PolicyArn {
 		switch {
 		case attached:
-			return nil, bindingErr(http.StatusConflict, "conflict", "policy %s is attached to %d CSP role(s); detach it before changing policy_arn", policy.Name, len(mappings))
+			return nil, bindingErr(http.StatusConflict, "conflict", "policy %s is attached to %d CSP role(s) in AWS; detach it before changing policy_arn (connections that failed to apply do not block the change; retry them after fixing)", policy.Name, liveMappings)
 		case policy.PolicyType == model.PolicyTypeManaged:
 			if !model.IsAwsManagedPolicyArn(newArn) {
 				return nil, bindingErr(http.StatusBadRequest, "invalid_request", "managed policy needs an AWS managed policy ARN (arn:aws:iam::aws:policy/...)")

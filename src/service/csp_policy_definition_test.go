@@ -363,3 +363,53 @@ func TestAccountPolicyClient_NeedsOneOidcConfig(t *testing.T) {
 	assert.Empty(t, f.api.calls)
 	_ = aws.String
 }
+
+// IAM-BUG-058: AWS 에 붙지 않은(failed) 연결만 있으면 ARN·inline 이름을 바꿀 수 있다
+func TestUpdatePolicy_FailedBindingsDoNotBlockChange(t *testing.T) {
+	t.Run("managed: 없는 ARN 으로 failed → ARN 수정 허용 → 재요청 applied", func(t *testing.T) {
+		f := newBindingFixture(t)
+		p := f.policy(t, "AmazonS3ReadOnlyAccess", model.PolicyTypeManaged, "arn:aws:iam::aws:policy/DoesNotExist", nil)
+		f.api.attachErr = noSuchEntity
+		res, err := f.svc.AttachPolicyToRole(f.role.ID, p.ID)
+		require.NoError(t, err)
+		require.Equal(t, model.PolicyBindingFailed, res.Result)
+		f.api.attachErr = nil
+
+		_, err = f.svc.UpdateCspPolicy(p.ID, &model.UpdateCspPolicyRequest{PolicyArn: "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"})
+		require.NoError(t, err)
+		res, err = f.svc.AttachPolicyToRole(f.role.ID, p.ID)
+		require.NoError(t, err)
+		assert.Equal(t, model.PolicyBindingApplied, res.Result)
+		assert.Equal(t, "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess", f.api.lastAttachArn)
+	})
+	t.Run("detach_failed·상태 빈 이전 연결은 AWS 에 남아 있을 수 있어 409", func(t *testing.T) {
+		for _, status := range []string{model.PolicyAwsStatusDetachFailed, ""} {
+			f := newBindingFixture(t)
+			p := f.policy(t, "ReadOnlyAccess", model.PolicyTypeManaged, "arn:aws:iam::aws:policy/ReadOnlyAccess", nil)
+			require.NoError(t, f.db.Create(&model.CspRolePolicyMapping{CspRoleID: f.role.ID, CspPolicyID: p.ID, AwsStatus: status}).Error)
+			_, err := f.svc.UpdateCspPolicy(p.ID, &model.UpdateCspPolicyRequest{PolicyArn: "arn:aws:iam::aws:policy/IAMReadOnlyAccess"})
+			requireBindingError(t, err, http.StatusConflict, "conflict")
+		}
+	})
+	t.Run("inline: failed 연결만 있으면 이름 변경 허용", func(t *testing.T) {
+		f := newBindingFixture(t)
+		p := f.policy(t, "mciam-t045-in", model.PolicyTypeInline, "", s3Doc())
+		require.NoError(t, f.db.Create(&model.CspRolePolicyMapping{CspRoleID: f.role.ID, CspPolicyID: p.ID, AwsStatus: model.PolicyAwsStatusFailed}).Error)
+		_, err := f.svc.UpdateCspPolicy(p.ID, &model.UpdateCspPolicyRequest{Name: "mciam-t045-in2"})
+		require.NoError(t, err)
+		assert.Equal(t, "mciam-t045-in2", f.reload(t, p.ID).Name)
+	})
+}
+
+func TestPolicyLookups_NotFoundErrorCode(t *testing.T) {
+	f := newBindingFixture(t)
+	_, err := f.svc.GetCspPolicyByID(999)
+	requireBindingError(t, err, http.StatusNotFound, "not_found")
+	_, err = f.svc.GetPolicyDocument(nil, 999)
+	requireBindingError(t, err, http.StatusNotFound, "not_found")
+	p := f.policy(t, "mciam-t045-c", model.PolicyTypeCustom, "", nil)
+	_, err = f.svc.GetPolicyDocument(nil, p.ID)
+	requireBindingError(t, err, http.StatusNotFound, "not_found")
+	_, err = f.svc.SyncPoliciesFromCloud(nil, &model.SyncPoliciesRequest{CspAccountID: 999})
+	requireBindingError(t, err, http.StatusBadRequest, "invalid_request")
+}

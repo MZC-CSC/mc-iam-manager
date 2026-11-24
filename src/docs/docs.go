@@ -2003,7 +2003,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Update a CSP policy definition and apply document changes in AWS.\n- custom (mciam-* only, else 403): new default version (CreatePolicyVersion; the oldest non-default version is removed at the 5-version limit). AWS first; on failure 502 and nothing is saved.\n- inline: the document is saved, then written to the attached CSP role (PutRolePolicy). If that fails the response is 200 with warnings and the mapping is marked failed; attach again to retry. 409 when attached to more than one role.\n- managed: documents cannot be changed (400).\nWhile attached, renaming an inline policy or changing policy_arn returns 409. Forbidden documents return 403.",
+                "description": "Update a CSP policy definition and apply document changes in AWS.\n- custom (mciam-* only, else 403): new default version (CreatePolicyVersion; the oldest non-default version is removed at the 5-version limit). AWS first; on failure 502 and nothing is saved.\n- inline: the document is saved, then written to the attached CSP role (PutRolePolicy). If that fails the response is 200 with warnings and the mapping is marked failed; attach again to retry. 409 when attached to more than one role.\n- managed: documents cannot be changed (400).\nWhile attached in AWS, renaming an inline policy or changing policy_arn returns 409. Connections whose attach failed (aws_status=failed) do not block it; attach again after the change. Forbidden documents return 403.",
                 "consumes": [
                     "application/json"
                 ],
