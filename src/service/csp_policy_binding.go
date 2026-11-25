@@ -281,7 +281,7 @@ func (s *CspPolicyService) prepareBinding(roleID, policyID uint, attach bool) (*
 		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "unsupported policy type %q", policy.PolicyType)
 	}
 
-	cfg, err := s.resolveBindingIdpConfig(role)
+	cfg, err := s.resolveBindingIdpConfig(role, attach)
 	if err != nil {
 		return nil, err
 	}
@@ -294,11 +294,13 @@ func (s *CspPolicyService) prepareBinding(roleID, policyID uint, attach bool) (*
 	return target, nil
 }
 
-// resolveBindingIdpConfig 대상 Role 에 AWS 를 쓸 관리용 자격증명의 IdP Config 를 정한다 (IAM-BUG-057 규칙, attach·detach·삭제 공통).
+// resolveBindingIdpConfig 대상 Role 에 AWS 를 쓸 관리용 자격증명의 IdP Config 를 정한다 (IAM-BUG-057).
 //  1. 소속 Config 가 활성 OIDC(role_arn 있음)이면 그것
-//  2. 소속 Config 가 SAML·비활성이거나 없으면, 같은 CSP 계정의 활성 aws OIDC Config 가 1개일 때 그것 (계정도 모르면 전체에서 1개일 때). 대체하면 WARN
+//  2. 소속 Config 가 SAML 이거나 없으면, 같은 CSP 계정의 활성 aws OIDC Config 가 1개일 때 그것 (계정도 모르면 전체에서 1개일 때). 대체하면 WARN
+//     소속 Config 가 비활성이면: 정리 작업(detach·CspRole 삭제)은 같은 규칙으로 대체하고,
+//     새 권한을 붙이는 작업(attach·inline 문서 반영, grant=true)은 400 이다 (관리자가 끈 연동을 우회하지 않는다)
 //  3. 그 밖에는 400 (PUT /api/roles/csp/id/:id 의 cspIdpConfigId 로 지정하도록 안내)
-func (s *CspPolicyService) resolveBindingIdpConfig(role *model.CspRole) (*model.CspIdpConfig, error) {
+func (s *CspPolicyService) resolveBindingIdpConfig(role *model.CspRole, grant bool) (*model.CspIdpConfig, error) {
 	usable := func(cfg *model.CspIdpConfig) bool {
 		return cfg != nil && cfg.IsActive && cfg.AuthMethod == model.AuthMethodOIDC && cfg.CspAccount != nil &&
 			cfg.CspAccount.CspType == "aws" && cfg.Config != nil && cfg.Config["role_arn"] != ""
@@ -312,6 +314,11 @@ func (s *CspPolicyService) resolveBindingIdpConfig(role *model.CspRole) (*model.
 		}
 		if usable(cfg) {
 			return cfg, nil
+		}
+		if grant && cfg != nil && !cfg.IsActive {
+			return nil, bindingErr(http.StatusBadRequest, "invalid_request",
+				"the IdP config %d (%s) of CSP role %s is inactive; activate the IdP config, or set another cspIdpConfigId with PUT /api/roles/csp/id/%d",
+				cfg.ID, cfg.Name, role.Name, role.ID)
 		}
 		reason = fmt.Sprintf("IdP config %d is missing, inactive, not OIDC or has no role_arn", *role.CspIdpConfigID)
 		if cfg != nil && accountID == nil {

@@ -224,42 +224,111 @@ func TestResolveBindingIdpConfig_Rules(t *testing.T) {
 	role := func(cfgID *uint, account *uint) *model.CspRole {
 		return &model.CspRole{ID: 7, Name: "mciam-t045-x", CspType: "aws", CspIdpConfigID: cfgID, CspAccountID: account}
 	}
-	got, err := f.svc.resolveBindingIdpConfig(role(&f.cfg.ID, nil))
+	got, err := f.svc.resolveBindingIdpConfig(role(&f.cfg.ID, nil), false)
 	require.NoError(t, err)
 	assert.Equal(t, f.cfg.ID, got.ID, "소속 활성 OIDC")
 
-	got, err = f.svc.resolveBindingIdpConfig(role(nil, nil))
+	got, err = f.svc.resolveBindingIdpConfig(role(nil, nil), false)
 	require.NoError(t, err, "① NULL + 활성 1개")
 	assert.Equal(t, f.cfg.ID, got.ID)
 
 	inactive := &model.CspIdpConfig{Name: "old", CspAccountID: acct, AuthMethod: model.AuthMethodOIDC, IsActive: true, Config: map[string]string{"role_arn": "arn:aws:iam::111111111111:role/mciam-old"}}
 	require.NoError(t, f.db.Create(inactive).Error)
 	require.NoError(t, f.db.Model(inactive).Update("is_active", false).Error)
-	got, err = f.svc.resolveBindingIdpConfig(role(&inactive.ID, nil))
+	got, err = f.svc.resolveBindingIdpConfig(role(&inactive.ID, nil), false)
 	require.NoError(t, err, "② 비활성 → 같은 계정의 활성 OIDC")
 	assert.Equal(t, f.cfg.ID, got.ID)
 
 	saml := &model.CspIdpConfig{Name: "saml", CspAccountID: acct, AuthMethod: model.AuthMethodSAML, IsActive: true, Config: map[string]string{}}
 	require.NoError(t, f.db.Create(saml).Error)
-	got, err = f.svc.resolveBindingIdpConfig(role(&saml.ID, nil))
+	got, err = f.svc.resolveBindingIdpConfig(role(&saml.ID, nil), false)
 	require.NoError(t, err, "③ SAML → 같은 계정의 활성 OIDC")
 	assert.Equal(t, f.cfg.ID, got.ID)
 
 	// ④ 다른 계정의 OIDC 가 하나 더 생기면 NULL·계정 모름은 400, 계정을 알면 그 계정 것
 	other := seedIdpConfig(t, f.db, "aws-oidc-2", "aws", model.AuthMethodOIDC, true, map[string]string{"role_arn": "arn:aws:iam::222222222222:role/mciam-mgmt2"})
-	_, err = f.svc.resolveBindingIdpConfig(role(nil, nil))
+	_, err = f.svc.resolveBindingIdpConfig(role(nil, nil), false)
 	requireBindingError(t, err, http.StatusBadRequest, "invalid_request")
 	assert.Contains(t, err.Error(), "PUT /api/roles/csp/id/7")
-	got, err = f.svc.resolveBindingIdpConfig(role(nil, &other.CspAccountID))
+	got, err = f.svc.resolveBindingIdpConfig(role(nil, &other.CspAccountID), false)
 	require.NoError(t, err)
 	assert.Equal(t, other.ID, got.ID)
-	got, err = f.svc.resolveBindingIdpConfig(role(&saml.ID, nil))
+	got, err = f.svc.resolveBindingIdpConfig(role(&saml.ID, nil), false)
 	require.NoError(t, err, "SAML 의 계정으로 좁힌다")
 	assert.Equal(t, f.cfg.ID, got.ID)
 
 	// 활성 OIDC 0개(계정 기준)
 	empty := &model.CspAccount{Name: "empty", CspType: "aws"}
 	require.NoError(t, f.db.Create(empty).Error)
-	_, err = f.svc.resolveBindingIdpConfig(role(nil, &empty.ID))
+	_, err = f.svc.resolveBindingIdpConfig(role(nil, &empty.ID), false)
 	requireBindingError(t, err, http.StatusBadRequest, "invalid_request")
+}
+
+// 규칙 2: 새 권한을 붙이는 작업(attach·inline 문서 반영)은 소속 Config 가 비활성이면 400, SAML 이면 같은 계정 OIDC 로 대체.
+// 정리 작업(detach·CspRole 삭제)은 비활성도 대체한다.
+func TestBindingConfigRules_GrantVsCleanup(t *testing.T) {
+	newRoleWithConfig := func(t *testing.T, f *bindingFixture, method model.AuthMethodType, active bool) *model.CspRole {
+		cfg := &model.CspIdpConfig{Name: "t045-" + string(method), CspAccountID: f.cfg.CspAccountID, AuthMethod: method, IsActive: true,
+			Config: map[string]string{"role_arn": testManagementRoleArn}}
+		require.NoError(t, f.db.Create(cfg).Error)
+		if !active {
+			require.NoError(t, f.db.Model(cfg).Update("is_active", false).Error)
+		}
+		return seedBindingRole(t, f.db, "mciam-t045-cfg", &cfg.ID)
+	}
+
+	t.Run("attach: 소속 Config 비활성 → 400, 행·AWS 호출 없음", func(t *testing.T) {
+		f := newBindingFixture(t)
+		r := newRoleWithConfig(t, f, model.AuthMethodOIDC, false)
+		p := f.policy(t, "p", model.PolicyTypeManaged, testManagedArn, nil)
+		_, err := f.svc.AttachPolicyToRole(r.ID, p.ID)
+		requireBindingError(t, err, http.StatusBadRequest, "invalid_request")
+		assert.Contains(t, err.Error(), "is inactive")
+		assert.Contains(t, err.Error(), "PUT /api/roles/csp/id/")
+		assert.Empty(t, f.api.calls)
+		assert.Nil(t, f.mapping(t, r.ID, p.ID))
+	})
+	t.Run("attach: 소속 Config SAML → 같은 계정 OIDC 로 대체", func(t *testing.T) {
+		f := newBindingFixture(t)
+		r := newRoleWithConfig(t, f, model.AuthMethodSAML, true)
+		p := f.policy(t, "p", model.PolicyTypeManaged, testManagedArn, nil)
+		res, err := f.svc.AttachPolicyToRole(r.ID, p.ID)
+		require.NoError(t, err)
+		assert.Equal(t, model.PolicyBindingApplied, res.Result)
+	})
+	t.Run("detach: 소속 Config 비활성 → 대체해서 해제", func(t *testing.T) {
+		f := newBindingFixture(t)
+		r := newRoleWithConfig(t, f, model.AuthMethodOIDC, false)
+		p := f.policy(t, "p", model.PolicyTypeManaged, testManagedArn, nil)
+		require.NoError(t, f.db.Create(&model.CspRolePolicyMapping{CspRoleID: r.ID, CspPolicyID: p.ID, AwsStatus: model.PolicyAwsStatusApplied}).Error)
+		res, err := f.svc.DetachPolicyFromRole(r.ID, p.ID)
+		require.NoError(t, err)
+		assert.Equal(t, model.PolicyBindingDetached, res.Result)
+	})
+	t.Run("CspRole 삭제: 소속 Config 비활성 → 대체해서 정리", func(t *testing.T) {
+		f := newBindingFixture(t)
+		require.NoError(t, f.db.AutoMigrate(&model.RoleMaster{}, &model.RoleMasterCspRoleMapping{}))
+		r := newRoleWithConfig(t, f, model.AuthMethodOIDC, false)
+		p := f.policy(t, "p", model.PolicyTypeManaged, testManagedArn, nil)
+		require.NoError(t, f.db.Create(&model.CspRolePolicyMapping{CspRoleID: r.ID, CspPolicyID: p.ID, AwsStatus: model.PolicyAwsStatusApplied}).Error)
+		res, err := f.svc.DeleteCspRole(r.ID)
+		require.NoError(t, err)
+		assert.Nil(t, res)
+		assert.Contains(t, f.api.calls, "detach:mciam-t045-cfg:"+testManagedArn)
+	})
+	t.Run("inline 문서 수정: 소속 Config 비활성 → 저장, 그 연결 failed + warnings", func(t *testing.T) {
+		f := newBindingFixture(t)
+		r := newRoleWithConfig(t, f, model.AuthMethodOIDC, false)
+		p := f.policy(t, testInlineName, model.PolicyTypeInline, "", s3Doc())
+		require.NoError(t, f.db.Create(&model.CspRolePolicyMapping{CspRoleID: r.ID, CspPolicyID: p.ID, AwsStatus: model.PolicyAwsStatusApplied}).Error)
+		res, err := f.svc.UpdateCspPolicy(p.ID, &model.UpdateCspPolicyRequest{PolicyDoc: s3Doc("ec2:DescribeRegions")})
+		require.NoError(t, err)
+		require.Len(t, res.BindingResults, 1)
+		assert.Equal(t, model.PolicyBindingFailed, res.BindingResults[0].Result)
+		assert.NotEmpty(t, res.Warnings)
+		m := f.mapping(t, r.ID, p.ID)
+		assert.Equal(t, model.PolicyAwsStatusFailed, m.AwsStatus)
+		assert.Contains(t, m.LastError, "is inactive")
+		assert.Empty(t, f.api.calls, "AWS 에 쓰지 않는다")
+	})
 }

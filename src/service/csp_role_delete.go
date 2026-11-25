@@ -72,7 +72,7 @@ func (s *CspPolicyService) DeleteCspRole(roleID uint) (*model.CspRoleDeleteResul
 		return nil, s.deleteCspRoleRows(roleID)
 	}
 
-	cfg, err := s.resolveBindingIdpConfig(role)
+	cfg, err := s.resolveBindingIdpConfig(role, false)
 	if err != nil {
 		return nil, err
 	}

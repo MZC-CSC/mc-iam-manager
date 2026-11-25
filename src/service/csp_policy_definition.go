@@ -252,8 +252,16 @@ func (s *CspPolicyService) UpdateCspPolicy(id uint, req *model.UpdateCspPolicyRe
 	if inlineRoleID != 0 {
 		res, err := s.AttachPolicyToRole(inlineRoleID, id)
 		if err != nil {
+			// 반영 전에 거절됐다(예: 소속 IdP Config 비활성). 연결을 failed 로 남겨 미반영임을 알리고, 원인을 고친 뒤 attach 재요청으로 맞춘다
 			msg := fmt.Sprintf("document saved but applying it to CSP role %d failed: %v", inlineRoleID, err)
 			log.Printf("[WARN] %s", msg)
+			if serr := s.cspPolicyRepo.UpdateRolePolicyMappingStatus(inlineRoleID, id, model.PolicyAwsStatusFailed, err.Error(), nil); serr != nil {
+				msg += fmt.Sprintf("; failed to record status: %v", serr)
+			}
+			result.BindingResults = append(result.BindingResults, &model.PolicyBindingResult{
+				Result: model.PolicyBindingFailed, CspRoleID: inlineRoleID, CspPolicyID: id, AwsStatus: model.PolicyAwsStatusFailed,
+				ErrorCode: "invalid_request", Message: msg, Warnings: []string{msg},
+			})
 			result.Warnings = append(result.Warnings, msg)
 		} else {
 			result.BindingResults = append(result.BindingResults, res)
