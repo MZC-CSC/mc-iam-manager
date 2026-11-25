@@ -474,6 +474,7 @@ func main() {
 		cspAccounts.PUT("/id/:accountId", cspAccountHandler.UpdateCspAccount, middleware.PlatformAdminMiddleware)
 		cspAccounts.DELETE("/id/:accountId", cspAccountHandler.DeleteCspAccount, middleware.PlatformAdminMiddleware)
 		cspAccounts.POST("/id/:accountId/validate", cspAccountHandler.ValidateCspAccount, middleware.PlatformAdminMiddleware)
+		cspAccounts.GET("/id/:accountId/readiness", cspAccountHandler.GetCspAccountReadiness)
 		cspAccounts.POST("/id/:accountId/activate", cspAccountHandler.ActivateCspAccount, middleware.PlatformAdminMiddleware)
 		cspAccounts.POST("/id/:accountId/deactivate", cspAccountHandler.DeactivateCspAccount, middleware.PlatformAdminMiddleware)
 	}

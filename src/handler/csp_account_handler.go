@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -22,12 +23,14 @@ var validCspTypes = map[string]bool{
 // CspAccountHandler CSP 계정 관리 핸들러
 type CspAccountHandler struct {
 	cspAccountService *service.CspAccountService
+	readinessService  *service.CspAccountReadinessService
 }
 
 // NewCspAccountHandler 새 CspAccountHandler 인스턴스 생성
 func NewCspAccountHandler(db *gorm.DB) *CspAccountHandler {
 	return &CspAccountHandler{
 		cspAccountService: service.NewCspAccountService(db),
+		readinessService:  service.NewCspAccountReadinessService(db),
 	}
 }
 
@@ -234,6 +237,54 @@ func (h *CspAccountHandler) ValidateCspAccount(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, result)
+}
+
+// GetCspAccountReadiness godoc
+// @Summary Get CSP account readiness
+// @Description CSP 계정의 임시자격증명 연동 준비 상태를 단계별로 반환합니다 (쓰기 없음).
+// @Description ① Keycloak OIDC 클라이언트 ② CSP 계정 ③ IdP Config ④ Provider 신뢰(연결 테스트) ⑤ CSP Role ⑥ 역할 매핑 ⑦ 실제 assume.
+// @Description 대상 CSP Role 은 같은 CSP 타입이면서 csp_account_id 가 이 계정이거나 미기록인 역할입니다.
+// @Description ④·⑦ 은 CSP 를 실제로 호출하므로 PlatformAdmin 일 때만 수행하고, ⑦ 은 checkIssue=true 일 때만 수행합니다. 자격증명은 반환하지 않습니다.
+// @Tags csp-accounts
+// @Produce json
+// @Param accountId path string true "Account ID"
+// @Param checkIssue query bool false "⑦ 실제 assume 수행 여부 (PlatformAdmin 만 유효)"
+// @Success 200 {object} model.CspAccountReadinessResponse
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Security BearerAuth
+// @Router /api/csp-accounts/id/{accountId}/readiness [get]
+// @Id getCspAccountReadiness
+func (h *CspAccountHandler) GetCspAccountReadiness(c echo.Context) error {
+	accountID, err := util.StringToUint(c.Param("accountId"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid account ID"})
+	}
+
+	opts := service.ReadinessOptions{
+		LiveChecks: isPlatformAdmin(c),
+		CheckIssue: c.QueryParam("checkIssue") == "true",
+	}
+	result, err := h.readinessService.GetReadiness(c.Request().Context(), accountID, opts)
+	if err != nil {
+		if errors.Is(err, service.ErrCspAccountNotFound) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": fmt.Sprintf("CSP account not found with ID: %d", accountID)})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// isPlatformAdmin 요청자가 platformAdmin 역할을 가졌는지 (PlatformAdminMiddleware 와 같은 기준)
+func isPlatformAdmin(c echo.Context) bool {
+	roles, _ := c.Get("platformRoles").([]string)
+	for _, r := range roles {
+		if r == "platformAdmin" {
+			return true
+		}
+	}
+	return false
 }
 
 // ActivateCspAccount godoc

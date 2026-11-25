@@ -145,3 +145,26 @@ func (r *CspMappingRepository) DeleteCspRoleMappingByPermissionID(permissionID u
 func (r *CspMappingRepository) DeleteCspRoleMappingByCspIDAndPermissionID(cspID, permissionID uint) error {
 	return r.db.Where("csp_id = ? AND permission_id = ?", cspID, permissionID).Delete(&model.RoleMasterCspRoleMapping{}).Error
 }
+
+// CountMappingsByCspRoleIDs CspRole 별로 매핑된 플랫폼 역할 수를 반환한다 (매핑 없는 ID 는 키 없음).
+func (r *CspMappingRepository) CountMappingsByCspRoleIDs(cspRoleIDs []uint) (map[uint]int, error) {
+	counts := make(map[uint]int, len(cspRoleIDs))
+	if len(cspRoleIDs) == 0 {
+		return counts, nil
+	}
+	var rows []struct {
+		CspRoleID uint
+		Cnt       int
+	}
+	if err := r.db.Model(&model.RoleMasterCspRoleMapping{}).
+		Select("csp_role_id, COUNT(*) AS cnt").
+		Where("csp_role_id IN ?", cspRoleIDs).
+		Group("csp_role_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.CspRoleID] = row.Cnt
+	}
+	return counts, nil
+}
