@@ -34,6 +34,48 @@ type CspValidationService struct {
 	keycloakService     KeycloakService
 	awsCredService      AwsCredentialService
 	gcpCredServiceIface GcpCredentialService // 테스트 주입용 (nil이면 NewGcpCredentialService() 사용)
+	// trustVerifier AWS provider·신뢰 정책 단계를 관리용 자격증명으로 확인한다 (IAM-BUG-045, IAM-TECH-045 M2). nil 이면 CspRoleService
+	trustVerifier valTrustVerifier
+}
+
+// valTrustVerifier 진단 API 의 AWS provider·신뢰 정책 단계 (CspRoleService 가 만족한다, 테스트는 mock)
+type valTrustVerifier interface {
+	VerifyTargetProvider(ctx context.Context, role *model.CspRole, method string) (string, error)
+	VerifyTargetTrustPolicy(ctx context.Context, role *model.CspRole, methods ...string) *model.TrustPolicyCheck
+}
+
+func (s *CspValidationService) resolveTrustVerifier() valTrustVerifier {
+	if s.trustVerifier != nil {
+		return s.trustVerifier
+	}
+	return NewCspRoleService(s.db, s.keycloakService)
+}
+
+// trustStepResult 신뢰 정책 판정을 진단 단계 결과로 바꾼다 (ok 만 통과)
+func trustStepResult(res *model.TrustPolicyCheck) (string, error) {
+	if res == nil {
+		return "", fmt.Errorf("trust policy check returned no result")
+	}
+	var parts []string
+	for _, st := range res.Statements {
+		if st.Status == model.TrustPolicyOK {
+			parts = append(parts, fmt.Sprintf("%s trusts %s (%s, %s=%s)", st.AuthMethod, st.ExpectedFederated, st.ExpectedAction, st.ExpectedAudKey, st.ExpectedAud))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s %s: %s", st.AuthMethod, st.Status, st.Message))
+		}
+	}
+	if res.Message != "" {
+		parts = append(parts, res.Message)
+	}
+	if len(res.Extra) > 0 {
+		parts = append(parts, "other statements: "+strings.Join(res.Extra, " | "))
+	}
+	parts = append(parts, res.Warnings...)
+	detail := fmt.Sprintf("role %s trust policy %s — %s", res.RoleName, res.Status, strings.Join(parts, "; "))
+	if res.Status != model.TrustPolicyOK {
+		return "", fmt.Errorf("%s", detail)
+	}
+	return detail, nil
 }
 
 // NewCspValidationService 새 CspValidationService 인스턴스 생성
@@ -380,8 +422,10 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 
 	// Step 2: CspRole 설정 확인
 	var idpArn, roleArn string
+	var oidcRole *model.CspRole
 	if !stepRunner(steps, 1, nil, func() (string, error) {
 		cspRole := mapping.CspRoles[0]
+		oidcRole = mapping.CspRoles[0]
 		if cspRole.IdpIdentifier == "" || cspRole.IamIdentifier == "" {
 			return "", fmt.Errorf("CspRole.idp_identifier(OIDC Provider ARN) 또는 iam_identifier(Role ARN) 비어 있음")
 		}
@@ -410,15 +454,16 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 	}
 
 	// Step 4: AWS OIDC Provider 확인
+	// 관리용 자격증명으로 확인한다 (IAM-BUG-045: 이전에는 서버 기본 자격증명이라 기본 배포에서 항상 실패했다)
 	if !stepRunner(steps, 3, awsOidcProviderRemediation, func() (string, error) {
-		return s.awsCredService.CheckOIDCProvider(ctx, idpArn)
+		return s.resolveTrustVerifier().VerifyTargetProvider(ctx, oidcRole, string(model.AuthMethodOIDC))
 	}) {
 		return buildFailedResponse(cspType, authMethod, 4, steps), nil
 	}
 
 	// Step 5: IAM Role WebIdentity Trust 확인
 	if !stepRunner(steps, 4, awsOidcRoleTrustRemediation, func() (string, error) {
-		return s.awsCredService.CheckRoleTrust(ctx, roleArn, "sts:AssumeRoleWithWebIdentity", idpArn)
+		return trustStepResult(s.resolveTrustVerifier().VerifyTargetTrustPolicy(ctx, oidcRole, string(model.AuthMethodOIDC)))
 	}) {
 		return buildFailedResponse(cspType, authMethod, 5, steps), nil
 	}
@@ -478,8 +523,10 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 
 	// Step 2: CspRole 설정 확인
 	var principalArn, roleArn, samlClientAudience string
+	var samlRole *model.CspRole
 	if !stepRunner(steps, 1, nil, func() (string, error) {
 		cspRole := mapping.CspRoles[0]
+		samlRole = mapping.CspRoles[0]
 		if cspRole.IdpIdentifier == "" || cspRole.IamIdentifier == "" {
 			return "", fmt.Errorf("CspRole.idp_identifier(Principal ARN) 또는 iam_identifier(Role ARN) 비어 있음")
 		}
@@ -524,14 +571,14 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 
 	// Step 5: AWS SAML Provider 확인
 	if !stepRunner(steps, 4, awsSamlProviderRemediation, func() (string, error) {
-		return s.awsCredService.CheckSAMLProvider(ctx, principalArn)
+		return s.resolveTrustVerifier().VerifyTargetProvider(ctx, samlRole, string(model.AuthMethodSAML))
 	}) {
 		return buildFailedResponse(cspType, authMethod, 5, steps), nil
 	}
 
 	// Step 6: IAM Role SAML Trust 확인
 	if !stepRunner(steps, 5, awsSamlRoleTrustRemediation, func() (string, error) {
-		return s.awsCredService.CheckRoleTrust(ctx, roleArn, "sts:AssumeRoleWithSAML", principalArn)
+		return trustStepResult(s.resolveTrustVerifier().VerifyTargetTrustPolicy(ctx, samlRole, string(model.AuthMethodSAML)))
 	}) {
 		return buildFailedResponse(cspType, authMethod, 6, steps), nil
 	}

@@ -86,6 +86,22 @@ func (m *mockValAwsService) CheckRoleTrust(_ context.Context, roleArn, expectedA
 	}
 	return "", nil
 }
+// 관리용 자격증명 경로의 provider·신뢰 정책 단계 (IAM-BUG-045). 같은 오류 필드를 쓴다
+func (m *mockValAwsService) VerifyTargetProvider(_ context.Context, _ *model.CspRole, method string) (string, error) {
+	if method == string(model.AuthMethodSAML) && m.samlProviderErr != nil {
+		return "", m.samlProviderErr
+	}
+	if method == string(model.AuthMethodOIDC) && m.oidcProviderErr != nil {
+		return "", m.oidcProviderErr
+	}
+	return "provider ok", nil
+}
+func (m *mockValAwsService) VerifyTargetTrustPolicy(_ context.Context, role *model.CspRole, methods ...string) *model.TrustPolicyCheck {
+	if m.roleTrustErr != nil {
+		return &model.TrustPolicyCheck{Status: model.TrustPolicyMismatch, RoleName: role.Name, Message: m.roleTrustErr.Error()}
+	}
+	return &model.TrustPolicyCheck{Status: model.TrustPolicyOK, RoleName: role.Name}
+}
 func (m *mockValAwsService) CheckCallerIdentity(_ context.Context, accessKeyID, secretKey string) (string, error) {
 	if m.callerIdentityErr != nil {
 		return "", m.callerIdentityErr
@@ -160,6 +176,7 @@ func newValService(
 		mappingRepoIface: &mockValMappingRepo{mapping: mapping, mappingErr: mappingErr},
 		keycloakService:  kc,
 		awsCredService:   aws,
+		trustVerifier:    aws,
 	}
 }
 

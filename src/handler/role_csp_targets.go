@@ -211,6 +211,8 @@ type checkCspRolesRequest struct {
 // CheckCspRoles godoc
 // @Summary Check target CSP roles
 // @Description 대상 CSP Role 이 IAM(DB)·CSP 에 있는지만 확인한다. DB·CSP 에 쓰지 않는다.
+// @Description exists_in_db·exists_in_csp 인 aws Role 에는 trustPolicy(신뢰 정책 판정)를 붙인다: 소속 IdP Config 로 만든 기대값(Federated·Action·aud, OIDC·SAML)과 AWS 실제 신뢰 정책 비교.
+// @Description trustPolicy.status: ok | missing | mismatch | not_found | error, statements[] 인증 방식별 판정, extra[] IAM 이 쓰지 않은 statement(정보성). 판정이 나빠도 항목 status 는 바뀌지 않는다.
 // @Tags roles
 // @Accept json
 // @Produce json
