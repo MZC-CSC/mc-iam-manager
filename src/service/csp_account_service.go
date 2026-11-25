@@ -19,6 +19,15 @@ type CspAccountService struct {
 	cspPolicyRepo    *repository.CspPolicyRepository
 	cspRoleRepo      *repository.CspRoleRepository
 	awsCredService   AwsCredentialService
+	// trustVerifier AWS provider·신뢰 정책 확인 (관리용 자격증명, IAM-TECH-045 M2). nil 이면 CspRoleService
+	trustVerifier valTrustVerifier
+}
+
+func (s *CspAccountService) resolveTrustVerifier() valTrustVerifier {
+	if s.trustVerifier != nil {
+		return s.trustVerifier
+	}
+	return NewCspRoleService(s.db, NewKeycloakService())
 }
 
 // NewCspAccountService 새 CspAccountService 인스턴스 생성
@@ -294,57 +303,29 @@ func (s *CspAccountService) validateCspRole(ctx context.Context, role *model.Csp
 // validateAWSRole AWS CspRole 검증 (OIDC/SAML: IDP+RoleTrust, SECRET_KEY: CallerIdentity)
 func (s *CspAccountService) validateAWSRole(ctx context.Context, role *model.CspRole, result *model.CspAccountValidationResult) {
 	cfg := role.CspIdpConfig
-	idpIdentifier := role.IdpIdentifier
-	iamIdentifier := role.IamIdentifier
 
 	switch cfg.AuthMethod {
-	case model.AuthMethodOIDC:
-		if idpIdentifier == "" {
-			result.Valid = false
-			result.Error = "IdpIdentifier (OIDC Provider ARN) is empty"
-			return
-		}
-		detail, err := s.awsCredService.CheckOIDCProvider(ctx, idpIdentifier)
+	case model.AuthMethodOIDC, model.AuthMethodSAML:
+		// 관리용 자격증명으로 provider 와 신뢰 정책을 확인한다 (IAM-TECH-045 M2, 진단 API 와 같은 판정).
+		// 기준값은 IdP Config 이다. 저장된 idp_identifier 가 다르면 경고만 붙인다
+		method := string(cfg.AuthMethod)
+		verifier := s.resolveTrustVerifier()
+		detail, err := verifier.VerifyTargetProvider(ctx, role, method)
 		if err != nil {
 			result.Valid = false
-			result.Error = fmt.Sprintf("OIDC provider check failed: %v", err)
+			result.Error = fmt.Sprintf("%s provider check failed: %v", method, err)
 			return
 		}
-		if iamIdentifier != "" {
-			trustDetail, err := s.awsCredService.CheckRoleTrust(ctx, iamIdentifier, "sts:AssumeRoleWithWebIdentity", idpIdentifier)
-			if err != nil {
-				result.Valid = false
-				result.Error = fmt.Sprintf("Role trust check failed: %v", err)
-				return
-			}
-			detail += " | " + trustDetail
-		}
-		result.Valid = true
-		result.Detail = detail
-
-	case model.AuthMethodSAML:
-		if idpIdentifier == "" {
-			result.Valid = false
-			result.Error = "IdpIdentifier (SAML Provider ARN) is empty"
-			return
-		}
-		detail, err := s.awsCredService.CheckSAMLProvider(ctx, idpIdentifier)
+		trust := verifier.VerifyTargetTrustPolicy(ctx, role, method)
+		result.TrustPolicy = trust
+		trustDetail, err := trustStepResult(trust)
 		if err != nil {
 			result.Valid = false
-			result.Error = fmt.Sprintf("SAML provider check failed: %v", err)
+			result.Error = fmt.Sprintf("Role trust check failed: %v", err)
 			return
 		}
-		if iamIdentifier != "" {
-			trustDetail, err := s.awsCredService.CheckRoleTrust(ctx, iamIdentifier, "sts:AssumeRoleWithSAML", idpIdentifier)
-			if err != nil {
-				result.Valid = false
-				result.Error = fmt.Sprintf("Role trust check failed: %v", err)
-				return
-			}
-			detail += " | " + trustDetail
-		}
 		result.Valid = true
-		result.Detail = detail
+		result.Detail = detail + " | " + trustDetail
 
 	case model.AuthMethodSecretKey:
 		accessKeyID := cfg.GetAccessKeyID()

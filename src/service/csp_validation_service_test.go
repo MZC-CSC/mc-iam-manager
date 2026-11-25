@@ -68,24 +68,6 @@ func (m *mockValAwsService) AssumeRoleWithWebIdentity(_ context.Context, roleArn
 func (m *mockValAwsService) AssumeRoleWithSAML(_ context.Context, roleArn, principalArn, samlAssertion, region string) (*model.CspCredentialResponse, error) {
 	return m.samlResult, m.samlErr
 }
-func (m *mockValAwsService) CheckOIDCProvider(_ context.Context, oidcProviderArn string) (string, error) {
-	if m.oidcProviderErr != nil {
-		return "", m.oidcProviderErr
-	}
-	return "", nil
-}
-func (m *mockValAwsService) CheckSAMLProvider(_ context.Context, samlProviderArn string) (string, error) {
-	if m.samlProviderErr != nil {
-		return "", m.samlProviderErr
-	}
-	return "", nil
-}
-func (m *mockValAwsService) CheckRoleTrust(_ context.Context, roleArn, expectedAction, expectedProviderArn string) (string, error) {
-	if m.roleTrustErr != nil {
-		return "", m.roleTrustErr
-	}
-	return "", nil
-}
 // 관리용 자격증명 경로의 provider·신뢰 정책 단계 (IAM-BUG-045). 같은 오류 필드를 쓴다
 func (m *mockValAwsService) VerifyTargetProvider(_ context.Context, _ *model.CspRole, method string) (string, error) {
 	if method == string(model.AuthMethodSAML) && m.samlProviderErr != nil {

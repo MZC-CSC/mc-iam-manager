@@ -970,7 +970,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Validate CSP account by checking actual CSP infrastructure (IDP provider existence, role trust policy, or credential validity) for each linked CspRole",
+                "description": "Validate CSP account by checking actual CSP infrastructure (IDP provider existence, role trust policy, or credential validity) for each linked CspRole\nAWS OIDC·SAML roles are checked with the management role of the IdP config (no server AWS credentials needed): provider existence (OIDC audience included) and the trust policy (Federated, Action, aud). Each result carries trust_policy with the same verdict as the credential validation API.",
                 "consumes": [
                     "application/json"
                 ],
@@ -14287,6 +14287,14 @@ const docTemplate = `{
                 "error": {
                     "type": "string"
                 },
+                "trust_policy": {
+                    "description": "TrustPolicy AWS OIDC·SAML Role 의 신뢰 정책 판정 (IAM-TECH-045 M2, 진단 API 와 같은 판정)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.TrustPolicyCheck"
+                        }
+                    ]
+                },
                 "valid": {
                     "type": "boolean"
                 }
@@ -15935,6 +15943,82 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.TrustPolicyCheck": {
+            "type": "object",
+            "properties": {
+                "extra": {
+                    "description": "IAM 이 쓰지 않은 statement 의 principal 요약",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "roleName": {
+                    "type": "string"
+                },
+                "statements": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.TrustStatementCheck"
+                    }
+                },
+                "status": {
+                    "description": "ok | missing | mismatch | not_found | error",
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "model.TrustStatementCheck": {
+            "type": "object",
+            "properties": {
+                "actualActions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "actualAud": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "authMethod": {
+                    "type": "string"
+                },
+                "expectedAction": {
+                    "type": "string"
+                },
+                "expectedAud": {
+                    "type": "string"
+                },
+                "expectedAudKey": {
+                    "type": "string"
+                },
+                "expectedFederated": {
+                    "type": "string"
+                },
+                "idpConfigId": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "ok | missing | mismatch | error",
                     "type": "string"
                 }
             }

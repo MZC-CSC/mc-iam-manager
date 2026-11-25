@@ -200,6 +200,7 @@ func (h *CspAccountHandler) DeleteCspAccount(c echo.Context) error {
 // ValidateCspAccount godoc
 // @Summary Validate CSP account
 // @Description Validate CSP account by checking actual CSP infrastructure (IDP provider existence, role trust policy, or credential validity) for each linked CspRole
+// @Description AWS OIDC·SAML roles are checked with the management role of the IdP config (no server AWS credentials needed): provider existence (OIDC audience included) and the trust policy (Federated, Action, aud). Each result carries trust_policy with the same verdict as the credential validation API.
 // @Tags csp-accounts
 // @Accept json
 // @Produce json

@@ -119,28 +119,8 @@ func TestIntegrationAWSOIDC_IAMRead(t *testing.T) {
 	require.NotEmpty(t, creds.AccessKeyId)
 	t.Logf("Assumed role: AccessKeyId=%s Expiration=%s", creds.AccessKeyId, creds.Expiration)
 
-	// Step 3: 발급된 임시 자격증명으로 OIDC Provider 확인 (Steps 4)
-	// checkAWSOIDCProvider는 환경 자격증명(DefaultConfig)을 사용 — 임시 키를 환경에 설정
-	t.Setenv("AWS_ACCESS_KEY_ID", creds.AccessKeyId)
-	t.Setenv("AWS_SECRET_ACCESS_KEY", creds.SecretAccessKey)
-	t.Setenv("AWS_SESSION_TOKEN", creds.SessionToken)
-
-	detail, err := awsSvc.CheckOIDCProvider(ctx, oidcProviderArn)
-	if err != nil {
-		t.Logf("CheckOIDCProvider: %v (degraded mode — IAM 권한 부족 가능)", err)
-	} else {
-		t.Logf("CheckOIDCProvider OK: %s", detail)
-		assert.NotEmpty(t, detail)
-	}
-
-	// Step 4: IAM Role Trust Policy 확인 (Step 5)
-	trustDetail, err := awsSvc.CheckRoleTrust(ctx, roleArn, "sts:AssumeRoleWithWebIdentity", oidcProviderArn)
-	if err != nil {
-		t.Logf("CheckRoleTrust: %v (degraded mode 가능)", err)
-	} else {
-		t.Logf("CheckRoleTrust OK: %s", trustDetail)
-		assert.NotEmpty(t, trustDetail)
-	}
+	// provider·신뢰 정책 확인(진단 4·5단계)은 서버 기본 자격증명 대신 관리용 자격증명으로 바뀌었다(IAM-BUG-045).
+	// 단위 테스트(csp_trust_policy_test.go)와 dev E2E 로 확인한다.
 }
 
 // ── AWS SECRET_KEY Step 3 — GetCallerIdentity SDK signed call ────────────────
