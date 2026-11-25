@@ -170,6 +170,7 @@ func TestResolveTargetCspRole_CreatesWithConfigTrustPolicy(t *testing.T) {
 	saved, err := svc.cspRoleRepo.GetRoleByID(role.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "created", saved.Status)
+	assert.Equal(t, model.CspRoleOriginCreated, saved.Origin, "IAM 이 만든 Role (IAM-BUG-057)")
 	assert.Equal(t, "arn:aws:iam::111111111111:role/mciam-t045-new", saved.IamIdentifier)
 	assert.Equal(t, testOidcProviderArn, saved.IdpIdentifier)
 	require.NotNil(t, saved.CspIdpConfigID)
@@ -185,6 +186,7 @@ func TestResolveTargetCspRole_RegistersExistingAwsRole(t *testing.T) {
 	assert.Equal(t, TargetResultRegisteredAndMapped, result)
 	assert.Empty(t, api.createCalls, "AWS 에 있으면 CreateRole 을 부르지 않는다")
 	assert.Equal(t, "arn:aws:iam::111111111111:role/mciam-t045-pre", role.IamIdentifier)
+	assert.Equal(t, model.CspRoleOriginRegistered, role.Origin, "이미 있던 Role 등록 (IAM-BUG-057)")
 
 	// 두 번째 저장은 DB 레코드를 그대로 쓴다 (AWS 조회 없음)
 	calls := api.getCalls

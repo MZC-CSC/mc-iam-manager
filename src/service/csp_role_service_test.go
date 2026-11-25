@@ -143,7 +143,9 @@ func TestUpdateCspRole_PersistsCspIdpConfigID(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	idpConfigID := uint(42)
+	// 소속 Config 는 존재·활성·CSP 타입이 맞아야 하고, 계정도 그 Config 의 계정으로 맞춘다 (IAM-BUG-057)
+	cfg := seedIdpConfig(t, svc.db, "gcp-oidc", "gcp", model.AuthMethodOIDC, true, map[string]string{})
+	idpConfigID := cfg.ID
 	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{
 		CspRoleName:    created.Name,
 		CspIdpConfigID: &idpConfigID,
@@ -154,6 +156,18 @@ func TestUpdateCspRole_PersistsCspIdpConfigID(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, updated.CspIdpConfigID)
 	assert.Equal(t, idpConfigID, *updated.CspIdpConfigID)
+	require.NotNil(t, updated.CspAccountID)
+	assert.Equal(t, cfg.CspAccountID, *updated.CspAccountID)
+
+	missing := uint(4242)
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{CspIdpConfigID: &missing})
+	assert.True(t, IsCspRoleRequestError(err), "없는 Config 는 400: %v", err)
+	awsCfg := seedIdpConfig(t, svc.db, "aws-oidc", "aws", model.AuthMethodOIDC, true, map[string]string{"role_arn": testManagementRoleArn})
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{CspIdpConfigID: &awsCfg.ID})
+	assert.True(t, IsCspRoleRequestError(err), "CSP 타입이 다르면 400: %v", err)
+	inactive := seedIdpConfig(t, svc.db, "gcp-old", "gcp", model.AuthMethodOIDC, false, map[string]string{})
+	err = svc.UpdateCspRole(created.ID, &model.CreateCspRoleRequest{CspIdpConfigID: &inactive.ID})
+	assert.True(t, IsCspRoleRequestError(err), "비활성 Config 는 400: %v", err)
 }
 
 // TestUpdateCspRole_PersistsIdentifierFields: UpdateCspRole이 Name/Description/

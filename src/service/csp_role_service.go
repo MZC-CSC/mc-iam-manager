@@ -434,7 +434,11 @@ func (s *CspRoleService) UpdateCspRole(id uint, req *model.CreateCspRoleRequest)
 	if err := s.GuardNotManagementRole(req.CspRoleName, req.IamIdentifier, "set as a CSP role"); err != nil {
 		return err
 	}
-	if req.CspRoleName != "" {
+	// AWS Role 은 이름을 바꿀 수 없다. 레코드 이름만 바꾸면 실제 Role 과 어긋난다 (IAM-BUG-057, custom 정책 이름 변경 400 과 같은 규칙)
+	if req.CspRoleName != "" && req.CspRoleName != existingRole.Name {
+		if existingRole.CspType == "aws" {
+			return cspRoleRequestErrorf("AWS roles cannot be renamed (CSP role %s); register a new CSP role instead", existingRole.Name)
+		}
 		existingRole.Name = req.CspRoleName
 	}
 	if req.Description != "" {
@@ -456,57 +460,30 @@ func (s *CspRoleService) UpdateCspRole(id uint, req *model.CreateCspRoleRequest)
 		existingRole.ExtendedConfig = req.ExtendedConfig
 	}
 	if req.CspIdpConfigID != nil {
+		// 소속 Config 지정: 존재·활성·CSP 타입을 확인하고 계정도 그 Config 의 계정으로 맞춘다 (IAM-BUG-057)
+		cfg, err := s.cspIdpConfigRepo.GetByID(*req.CspIdpConfigID)
+		if err != nil {
+			return fmt.Errorf("failed to get IdP config: %w", err)
+		}
+		if cfg == nil {
+			return cspRoleRequestErrorf("cspIdpConfigId %d not found", *req.CspIdpConfigID)
+		}
+		cspType := ""
+		if cfg.CspAccount != nil {
+			cspType = cfg.CspAccount.CspType
+		}
+		if !cfg.IsActive || cspType != existingRole.CspType {
+			return cspRoleRequestErrorf("cspIdpConfigId %d does not match CSP role %s (config: active=%t cspType=%s, role cspType=%s)",
+				cfg.ID, existingRole.Name, cfg.IsActive, cspType, existingRole.CspType)
+		}
 		existingRole.CspIdpConfigID = req.CspIdpConfigID
+		accountID := cfg.CspAccountID
+		existingRole.CspAccountID = &accountID
 	}
 	// DB 전용 업데이트로 변경 (기존에는 CspType 무관하게 항상 AWS UpdateRoleDescription을
 	// 호출해 GCP/Alibaba 등 비-AWS CspRole 수정 시 항상 실패했다 — SAML ExtendedConfig를
 	// 모든 CSP에서 API로 설정 가능하게 하려면 이 경로도 함께 고쳐야 한다).
 	return s.cspRoleRepo.UpdateCspRoleRecord(existingRole)
-}
-
-// DeleteCspRole CSP 역할을 삭제합니다.
-// DeleteCspRole CspRole(mcmp_role_csp_roles) 레코드를 삭제합니다.
-// CreateCspRole과 대칭되는 CspType 분기: AWS는 실제 클라우드 Role도 함께 삭제하고,
-// 그 외에는 DB 레코드만 정리합니다. 이 레코드를 참조하는 RoleMasterCspRoleMapping은
-// 호출 전에 별도로 정리되어 있어야 한다(핸들러에서 DeleteRoleCspRoleMappingsByCspRoleID 선행 호출).
-func (s *CspRoleService) DeleteCspRole(id uint) error {
-	role, err := s.cspRoleRepo.GetRoleByID(id)
-	if err != nil {
-		return fmt.Errorf("failed to find CSP role: %w", err)
-	}
-	// 관리용 Role 은 IAM 으로 지우지 않는다 (AWS DeleteRole 이 호출되어 IAM 기능이 멈춘다, 409)
-	if err := s.GuardCspRoleNotManagementRole(role, "deleted"); err != nil {
-		return err
-	}
-
-	if role.CspType == "aws" {
-		if err := s.deleteAwsIamRole(role); err != nil {
-			return err
-		}
-	}
-
-	return s.cspRoleRepo.DeleteCspRoleRecord(id)
-}
-
-// deleteAwsIamRole AWS IAM Role을 삭제합니다. (private, AWS 전용)
-func (s *CspRoleService) deleteAwsIamRole(role *model.CspRole) error {
-	var cfg *model.CspIdpConfig
-	if role.CspIdpConfigID != nil {
-		cfg, _ = s.cspIdpConfigRepo.GetByID(*role.CspIdpConfigID)
-	}
-	api, err := s.awsRoleClientFor(cfg)
-	if err != nil {
-		return err
-	}
-	if _, err := api.DeleteRole(context.TODO(), &iam.DeleteRoleInput{RoleName: aws.String(role.Name)}); err != nil {
-		// AWS 에서 이미 지워진 Role 이면 DB 레코드만 정리한다 (IAM-BUG-052: 404 로 실패하면 레코드를 지울 방법이 없었다)
-		if isAwsNoSuchEntity(err) {
-			log.Printf("[WARN] CSP role %s: AWS role does not exist — removing the DB record only", role.Name)
-			return nil
-		}
-		return fmt.Errorf("failed to delete IAM role: %v", err)
-	}
-	return nil
 }
 
 // CleanupExpiredCredentials 만료된 임시 자격 증명을 정리합니다.
