@@ -699,21 +699,55 @@ func TestGetTemporaryCredentials_UnsupportedCspType(t *testing.T) {
 	assert.Equal(t, ErrUnsupportedCspType, err)
 }
 
-// SAML 발급 사전 확인 Check 3 은 관리용 자격증명으로 provider 를 확인하고, 실패해도 경고만 하고 발급한다 (IAM-TECH-045 M2)
-func TestGetTemporaryCredentials_AWS_SAML_ProviderCheckWarnsOnly(t *testing.T) {
-	aws := &mockAwsCredService{samlResult: awsSamlCred}
+// SAML 발급 사전 확인 Check 3 (IAM-TECH-045 M2): provider 없음(NoSuchEntity)이면 400 성격으로 중단, 그 밖의 확인 실패는 경고만 하고 발급
+func samlCheck3Service(aws *mockAwsCredService, verifyErr error) *CspCredentialService {
 	mapping := buildMapping(constants.AuthMethodSAML, idpArn, roleArn, model.AuthMethodSAML, nil)
 	mapping.CspRoles[0].ExtendedConfig = map[string]interface{}{"saml_client_id": idpArn}
-	svc := newCredServiceWithMocks(credServiceDeps{
+	return newCredServiceWithMocks(credServiceDeps{
 		aws:      aws,
 		gcp:      &mockGcpCredService{},
 		alibaba:  &mockAlibabaCredService{},
 		kc:       samlKC(),
 		userRepo: &mockUserRepoForCred{role: stdUserRole()},
 		mapRepo:  &mockCspMappingRepo{mapping: mapping},
-		verifier: &mockValAwsService{samlProviderErr: errors.New("saml provider does not exist")},
+		verifier: &mockValAwsService{samlProviderErr: verifyErr},
 	})
+}
+
+func TestGetTemporaryCredentials_AWS_SAML_ProviderNotFoundStops(t *testing.T) {
+	aws := &mockAwsCredService{samlResult: awsSamlCred}
+	svc := samlCheck3Service(aws, &ProviderNotFoundError{Method: "SAML", ProviderArn: idpArn})
+	_, err := svc.GetTemporaryCredentials(context.Background(), 1, "kc_user_id", req("aws", "SAML"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCspProviderNotFound)
+	assert.Contains(t, err.Error(), "saml_provider_arn")
+	assert.Contains(t, err.Error(), idpArn)
+	assert.Equal(t, 0, aws.samlCalls, "provider 가 없으면 AssumeRoleWithSAML 을 호출하지 않는다")
+}
+
+func TestGetTemporaryCredentials_AWS_SAML_ProviderNotFoundOtherArnWarnsOnly(t *testing.T) {
+	// 확인한 ARN(Config)이 실제 발급에 쓰는 ARN(CSP Role IDP Identifier)과 다르면 중단하지 않는다
+	aws := &mockAwsCredService{samlResult: awsSamlCred}
+	svc := samlCheck3Service(aws, &ProviderNotFoundError{Method: "SAML", ProviderArn: "arn:aws:iam::123456789012:saml-provider/other"})
 	cred, err := svc.GetTemporaryCredentials(context.Background(), 1, "kc_user_id", req("aws", "SAML"))
-	require.NoError(t, err, "provider 확인 실패는 경고만")
+	require.NoError(t, err)
 	assert.Equal(t, "ASIA_SAML", cred.AccessKeyId)
+}
+
+func TestGetTemporaryCredentials_AWS_SAML_ProviderCheckAccessDeniedContinues(t *testing.T) {
+	aws := &mockAwsCredService{samlResult: awsSamlCred}
+	svc := samlCheck3Service(aws, errors.New("the management role is not allowed to read provider: AccessDenied"))
+	cred, err := svc.GetTemporaryCredentials(context.Background(), 1, "kc_user_id", req("aws", "SAML"))
+	require.NoError(t, err, "확인 권한이 없으면 경고만")
+	assert.Equal(t, "ASIA_SAML", cred.AccessKeyId)
+	assert.Equal(t, 1, aws.samlCalls)
+}
+
+func TestGetTemporaryCredentials_AWS_SAML_ProviderCheckOKContinues(t *testing.T) {
+	aws := &mockAwsCredService{samlResult: awsSamlCred}
+	svc := samlCheck3Service(aws, nil)
+	cred, err := svc.GetTemporaryCredentials(context.Background(), 1, "kc_user_id", req("aws", "SAML"))
+	require.NoError(t, err)
+	assert.Equal(t, "ASIA_SAML", cred.AccessKeyId)
+	assert.Equal(t, 1, aws.samlCalls)
 }

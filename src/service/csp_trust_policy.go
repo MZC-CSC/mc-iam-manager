@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -337,6 +338,22 @@ func (s *CspRoleService) VerifyTargetTrustPolicy(ctx context.Context, role *mode
 	return out
 }
 
+// ErrCspProviderNotFound provider 가 AWS 에 없음 (errors.Is 로 판별)
+var ErrCspProviderNotFound = errors.New("CSP identity provider not found")
+
+// ProviderNotFoundError VerifyTargetProvider 가 provider 없음(NoSuchEntity)을 확인했을 때의 오류
+type ProviderNotFoundError struct {
+	Method      string
+	ProviderArn string
+}
+
+func (e *ProviderNotFoundError) Error() string {
+	return fmt.Sprintf("%s provider %s does not exist in AWS — create it in AWS IAM", e.Method, e.ProviderArn)
+}
+
+// Is errors.Is(err, ErrCspProviderNotFound)
+func (e *ProviderNotFoundError) Is(target error) bool { return target == ErrCspProviderNotFound }
+
 // VerifyTargetProvider 인증 방식의 provider 가 AWS 에 있는지 관리용 자격증명으로 확인한다 (진단 API).
 // OIDC 는 audience 가 provider 의 client ID 목록에 있는지도 본다. 저장된 idp_identifier 가 Config 와 다르면 경고를 붙인다.
 func (s *CspRoleService) VerifyTargetProvider(ctx context.Context, role *model.CspRole, method string) (string, error) {
@@ -368,7 +385,7 @@ func (s *CspRoleService) VerifyTargetProvider(ctx context.Context, role *model.C
 	}
 	switch {
 	case isAwsNoSuchEntity(err):
-		return "", fmt.Errorf("%s provider %s does not exist in AWS — create it in AWS IAM", method, e.federated)
+		return "", &ProviderNotFoundError{Method: method, ProviderArn: e.federated}
 	case isAwsAccessDenied(err):
 		return "", fmt.Errorf("the management role is not allowed to read provider %s: %v", e.federated, err)
 	case err != nil:
