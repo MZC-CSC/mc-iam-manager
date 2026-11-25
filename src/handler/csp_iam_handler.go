@@ -5,9 +5,8 @@ import (
 	"strconv"
 
 	"github.com/labstack/echo/v4"
-	"github.com/m-cmp/mc-iam-manager/csp"
-	awscsp "github.com/m-cmp/mc-iam-manager/csp/aws"
 	"github.com/m-cmp/mc-iam-manager/repository"
+	"github.com/m-cmp/mc-iam-manager/service"
 	"gorm.io/gorm"
 )
 
@@ -17,7 +16,12 @@ type CspIAMHandler struct {
 	cspAccountRepo   *repository.CspAccountRepository
 	cspIdpConfigRepo *repository.CspIdpConfigRepository
 	db               *gorm.DB
+	cspRoleService   *service.CspRoleService
 }
+
+// csIamWriteBlocked /api/csp/iam/roles 쓰기 차단 안내 (IAM-BUG-046)
+const csIamWriteBlocked = "writing AWS IAM roles through /api/csp/iam/roles is disabled; use POST /api/roles/csp to create or register a CSP role, " +
+	"POST /api/csp-target-roles/id/{id}/trust-policy/sync to fix its trust policy, and DELETE /api/roles/csp/id/{id} to delete it"
 
 // NewCspIAMHandler 새 CspIAMHandler 인스턴스 생성
 func NewCspIAMHandler(db *gorm.DB) *CspIAMHandler {
@@ -25,62 +29,10 @@ func NewCspIAMHandler(db *gorm.DB) *CspIAMHandler {
 		cspAccountRepo:   repository.NewCspAccountRepository(db),
 		cspIdpConfigRepo: repository.NewCspIdpConfigRepository(db),
 		db:               db,
+		cspRoleService:   service.NewCspRoleService(db, service.NewKeycloakService()),
 	}
 }
 
-// getIAMClient CSP 계정 ID를 기반으로 IAM 클라이언트를 생성합니다.
-// OIDC 인증 방식을 기준으로 동작하며, IDP 설정의 role_arn을 사용합니다.
-func (h *CspIAMHandler) getIAMClient(c echo.Context, cspAccountID uint) (csp.IAMClient, error) {
-	// 1. CSP 계정 조회
-	account, err := h.cspAccountRepo.GetByID(cspAccountID)
-	if err != nil {
-		return nil, err
-	}
-
-	// 2. 활성 IDP 설정 조회 (OIDC 우선)
-	idpConfigs, err := h.cspIdpConfigRepo.GetActiveByAccountID(cspAccountID)
-	if err != nil {
-		return nil, err
-	}
-	if len(idpConfigs) == 0 {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "no active IDP config found for CSP account")
-	}
-
-	// OIDC 설정 우선 선택
-	idpConfig := idpConfigs[0]
-	for _, cfg := range idpConfigs {
-		if cfg.IsOIDC() {
-			idpConfig = cfg
-			break
-		}
-	}
-
-	roleARN := idpConfig.Config["role_arn"]
-	if roleARN == "" {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "role_arn not configured in IDP config")
-	}
-
-	// 3. 요청 컨텍스트에서 JWT 액세스 토큰 추출
-	accessToken, ok := c.Get("access_token").(string)
-	if !ok || accessToken == "" {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "access token not found")
-	}
-
-	cfg := &csp.IAMClientConfig{
-		Region:           account.GetRegion(),
-		RoleARN:          roleARN,
-		WebIdentityToken: accessToken,
-	}
-
-	switch account.CspType {
-	case "aws":
-		return awscsp.NewAWSIAMClient(cfg, h.db)
-	default:
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "unsupported CSP type: "+account.CspType)
-	}
-}
-
-// parseCspAccountID 요청에서 csp_account_id를 파싱합니다.
 func parseCspAccountID(c echo.Context) (uint, error) {
 	idStr := c.QueryParam("csp_account_id")
 	if idStr == "" {
@@ -95,12 +47,11 @@ func parseCspAccountID(c echo.Context) (uint, error) {
 
 // CreateIAMRole godoc
 // @Summary CSP IAM 역할 생성
-// @Description CSP에 IAM 역할을 직접 생성합니다
+// @Description Disabled (IAM-BUG-046): always 400. Use POST /api/roles/csp to create or register a CSP role (the trust policy is built from the IdP config).
 // @Tags csp-iam
 // @Accept json
 // @Produce json
 // @Param csp_account_id query int true "CSP 계정 ID"
-// @Param role body csp.Role true "IAM 역할 정보"
 // @Success 201 {object} map[string]string
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
@@ -108,40 +59,20 @@ func parseCspAccountID(c echo.Context) (uint, error) {
 // @Router /api/csp/iam/roles [post]
 // @Id createCspIAMRole
 func (h *CspIAMHandler) CreateIAMRole(c echo.Context) error {
-	cspAccountID, err := parseCspAccountID(c)
-	if err != nil {
-		return err
-	}
-
-	var role csp.Role
-	if err := c.Bind(&role); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-	if role.Name == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "role name is required"})
-	}
-
-	client, err := h.getIAMClient(c, cspAccountID)
-	if err != nil {
-		return handleIAMError(c, err)
-	}
-
-	if err := client.CreateRole(c.Request().Context(), &role); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-
-	return c.JSON(http.StatusCreated, map[string]string{"message": "IAM role created successfully", "name": role.Name})
+	// IAM-BUG-046: 이 API 는 신뢰 정책을 Federated·Condition 없이 통째로 교체하고 호출자 토큰으로 관리용 Role 을 assume 했다. 쓰기는 막고 대체 API 로 안내한다
+	return c.JSON(http.StatusBadRequest, map[string]string{"error": csIamWriteBlocked, "errorCode": "invalid_request"})
 }
 
 // GetIAMRole godoc
 // @Summary CSP IAM 역할 조회
-// @Description CSP에서 특정 IAM 역할 정보를 조회합니다
+// @Description Get an AWS IAM role with the management role of the account (active aws OIDC IdP config). The trust policy is returned as is.
 // @Tags csp-iam
 // @Accept json
 // @Produce json
 // @Param roleName path string true "IAM 역할명"
 // @Param csp_account_id query int true "CSP 계정 ID"
-// @Success 200 {object} csp.Role
+// @Success 200 {object} model.AwsRoleView
+// @Failure 502 {object} map[string]interface{}
 // @Failure 400 {object} map[string]string
 // @Failure 404 {object} map[string]string
 // @Failure 500 {object} map[string]string
@@ -151,36 +82,28 @@ func (h *CspIAMHandler) CreateIAMRole(c echo.Context) error {
 func (h *CspIAMHandler) GetIAMRole(c echo.Context) error {
 	roleName := c.Param("roleName")
 	if roleName == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "roleName is required"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "roleName is required", "errorCode": "invalid_request"})
 	}
-
 	cspAccountID, err := parseCspAccountID(c)
 	if err != nil {
 		return err
 	}
-
-	client, err := h.getIAMClient(c, cspAccountID)
+	// 계정의 관리용 자격증명으로 조회한다 (이전에는 호출자 토큰으로 assume 해 항상 실패했다)
+	view, err := h.cspRoleService.GetAwsRoleView(c.Request().Context(), cspAccountID, roleName)
 	if err != nil {
-		return handleIAMError(c, err)
+		return trustSyncErrorJSON(c, err)
 	}
-
-	role, err := client.GetRole(c.Request().Context(), roleName)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-
-	return c.JSON(http.StatusOK, role)
+	return c.JSON(http.StatusOK, view)
 }
 
 // UpdateIAMRole godoc
 // @Summary CSP IAM 역할 수정
-// @Description CSP의 IAM 역할 정보를 수정합니다
+// @Description Disabled (IAM-BUG-046): always 400. It replaced the whole trust policy without Federated and Condition. Use POST /api/csp-target-roles/id/{id}/trust-policy/sync.
 // @Tags csp-iam
 // @Accept json
 // @Produce json
 // @Param roleName path string true "IAM 역할명"
 // @Param csp_account_id query int true "CSP 계정 ID"
-// @Param role body csp.Role true "IAM 역할 수정 정보"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
@@ -188,37 +111,13 @@ func (h *CspIAMHandler) GetIAMRole(c echo.Context) error {
 // @Router /api/csp/iam/roles/{roleName} [put]
 // @Id updateCspIAMRole
 func (h *CspIAMHandler) UpdateIAMRole(c echo.Context) error {
-	roleName := c.Param("roleName")
-	if roleName == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "roleName is required"})
-	}
-
-	cspAccountID, err := parseCspAccountID(c)
-	if err != nil {
-		return err
-	}
-
-	var role csp.Role
-	if err := c.Bind(&role); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-	role.Name = roleName
-
-	client, err := h.getIAMClient(c, cspAccountID)
-	if err != nil {
-		return handleIAMError(c, err)
-	}
-
-	if err := client.UpdateRole(c.Request().Context(), &role); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "IAM role updated successfully", "name": roleName})
+	// IAM-BUG-046: 이 API 는 신뢰 정책을 Federated·Condition 없이 통째로 교체하고 호출자 토큰으로 관리용 Role 을 assume 했다. 쓰기는 막고 대체 API 로 안내한다
+	return c.JSON(http.StatusBadRequest, map[string]string{"error": csIamWriteBlocked, "errorCode": "invalid_request"})
 }
 
 // DeleteIAMRole godoc
 // @Summary CSP IAM 역할 삭제
-// @Description CSP에서 IAM 역할을 삭제합니다
+// @Description Disabled (IAM-BUG-046): always 400. Use DELETE /api/roles/csp/id/{id} (detaches IAM policies and keeps registered roles in AWS).
 // @Tags csp-iam
 // @Accept json
 // @Produce json
@@ -231,26 +130,8 @@ func (h *CspIAMHandler) UpdateIAMRole(c echo.Context) error {
 // @Router /api/csp/iam/roles/{roleName} [delete]
 // @Id deleteCspIAMRole
 func (h *CspIAMHandler) DeleteIAMRole(c echo.Context) error {
-	roleName := c.Param("roleName")
-	if roleName == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "roleName is required"})
-	}
-
-	cspAccountID, err := parseCspAccountID(c)
-	if err != nil {
-		return err
-	}
-
-	client, err := h.getIAMClient(c, cspAccountID)
-	if err != nil {
-		return handleIAMError(c, err)
-	}
-
-	if err := client.DeleteRole(c.Request().Context(), roleName); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-
-	return c.NoContent(http.StatusNoContent)
+	// IAM-BUG-046: 이 API 는 신뢰 정책을 Federated·Condition 없이 통째로 교체하고 호출자 토큰으로 관리용 Role 을 assume 했다. 쓰기는 막고 대체 API 로 안내한다
+	return c.JSON(http.StatusBadRequest, map[string]string{"error": csIamWriteBlocked, "errorCode": "invalid_request"})
 }
 
 // handleIAMError IAM 클라이언트 생성 오류를 HTTP 오류로 변환합니다.

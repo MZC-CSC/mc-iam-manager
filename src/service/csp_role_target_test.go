@@ -28,6 +28,19 @@ type fakeAwsRoleAPI struct {
 	createCalls   []*iam.CreateRoleInput
 	deleteCalls   []string
 	samlProviders map[string]bool // 있는 SAML provider ARN
+	updateErr     error
+	updateCalls   []*iam.UpdateAssumeRolePolicyInput
+}
+
+func (f *fakeAwsRoleAPI) UpdateAssumeRolePolicy(_ context.Context, in *iam.UpdateAssumeRolePolicyInput, _ ...func(*iam.Options)) (*iam.UpdateAssumeRolePolicyOutput, error) {
+	f.updateCalls = append(f.updateCalls, in)
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
+	if r := f.roles[aws.ToString(in.RoleName)]; r != nil {
+		r.AssumeRolePolicyDocument = aws.String(url.QueryEscape(aws.ToString(in.PolicyDocument)))
+	}
+	return &iam.UpdateAssumeRolePolicyOutput{}, nil
 }
 
 func (f *fakeAwsRoleAPI) GetSAMLProvider(_ context.Context, in *iam.GetSAMLProviderInput, _ ...func(*iam.Options)) (*iam.GetSAMLProviderOutput, error) {

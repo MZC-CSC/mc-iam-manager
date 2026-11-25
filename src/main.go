@@ -34,7 +34,7 @@ import (
 )
 
 // @title MC IAM Manager API
-// @version 0.7.3
+// @version 0.7.4
 // @description MC IAM Manager API Documentation
 // @BasePath /
 // @securityDefinitions.apikey BearerAuth
@@ -133,6 +133,7 @@ func main() {
 	cspIdpConfigHandler := handler.NewCspIdpConfigHandler(db)
 	cspPolicyHandler := handler.NewCspPolicyHandler(db)
 	cspIAMHandler := handler.NewCspIAMHandler(db)
+	cspTargetRoleHandler := handler.NewCspTargetRoleHandler(db)
 	cspValidationHandler := handler.NewCspValidationHandler(db)
 
 	// 조직 핸들러 초기화
@@ -492,6 +493,9 @@ func main() {
 		cspIdpConfigs.POST("/id/:configId/deactivate", cspIdpConfigHandler.DeactivateCspIdpConfig, middleware.PlatformAdminMiddleware)
 		cspIdpConfigs.GET("/summary", cspIdpConfigHandler.GetCspIdpSummary)
 		cspIdpConfigs.POST("/health-check", cspIdpConfigHandler.BulkHealthCheck, middleware.PlatformAdminMiddleware)
+		// 그 Config 에 소속된 대상 CSP Role 신뢰 정책 일괄 확인·재동기화 (IAM-TECH-045 M2). check 는 /roles/csp/check 와 같은 등급
+		cspIdpConfigs.POST("/id/:configId/trust-policy/check", cspTargetRoleHandler.CheckIdpConfigTrustPolicy, middleware.PlatformRoleMiddleware(middleware.Write))
+		cspIdpConfigs.POST("/id/:configId/trust-policy/sync", cspTargetRoleHandler.SyncIdpConfigTrustPolicy, middleware.PlatformAdminMiddleware)
 	}
 
 	// 조직 관리 라우트 (admin 이상)
@@ -574,7 +578,13 @@ func main() {
 		cspPolicies.GET("/role/:roleId", cspPolicyHandler.GetRolePolicies)
 	}
 
-	// CSP IAM 직접 관리 라우트 (CSP IAM Role CRUD)
+	// 대상 CSP Role (IAM-TECH-045 M2, 기존 /roles/csp 이전은 IAM-TECH-055)
+	cspTargetRoles := api.Group("/csp-target-roles", middleware.PlatformRoleMiddleware(middleware.Read))
+	{
+		cspTargetRoles.POST("/id/:roleId/trust-policy/sync", cspTargetRoleHandler.SyncTrustPolicy, middleware.PlatformAdminMiddleware)
+	}
+
+	// CSP IAM 직접 관리 라우트 (CSP IAM Role CRUD) — 쓰기는 IAM-BUG-046 으로 막힘(400), GET 만 동작
 	cspIAM := api.Group("/csp/iam", middleware.PlatformAdminMiddleware)
 	{
 		cspIAM.POST("/roles", cspIAMHandler.CreateIAMRole)

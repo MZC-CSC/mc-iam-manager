@@ -48,54 +48,6 @@ definitions:
     - RoleTypePlatform
     - RoleTypeWorkspace
     - RoleTypeCSP
-  csp.Principal:
-    properties:
-      AWS:
-        items:
-          type: string
-        type: array
-      Service:
-        items:
-          type: string
-        type: array
-    type: object
-  csp.Role:
-    properties:
-      description:
-        type: string
-      name:
-        type: string
-      policy:
-        $ref: '#/definitions/csp.RolePolicy'
-      tags:
-        additionalProperties:
-          type: string
-        type: object
-    type: object
-  csp.RolePolicy:
-    properties:
-      Statement:
-        items:
-          $ref: '#/definitions/csp.RolePolicyStatement'
-        type: array
-      Version:
-        type: string
-    type: object
-  csp.RolePolicyStatement:
-    properties:
-      Action:
-        items:
-          type: string
-        type: array
-      Effect:
-        type: string
-      Principal:
-        $ref: '#/definitions/csp.Principal'
-      Resource:
-        items:
-          type: string
-        type: array
-    type: object
   handler.UserListRequest:
     properties:
       enabled:
@@ -325,6 +277,20 @@ definitions:
     - AuthMethodOIDC
     - AuthMethodSAML
     - AuthMethodSecretKey
+  model.AwsRoleView:
+    properties:
+      arn:
+        type: string
+      description:
+        type: string
+      maxSessionDuration:
+        type: integer
+      name:
+        type: string
+      trustPolicy:
+        additionalProperties: true
+        type: object
+    type: object
   model.BulkHealthCheckRequest:
     properties:
       csp_account_id:
@@ -1928,6 +1894,50 @@ definitions:
       value:
         type: string
     type: object
+  model.TrustPolicyBulkItem:
+    properties:
+      cspRoleId:
+        type: integer
+      message:
+        type: string
+      roleName:
+        type: string
+      status:
+        description: 'check: 판정 / sync: unchanged | applied | would_change | registered_role
+          | protected | not_found | invalid_request | error'
+        type: string
+      sync:
+        $ref: '#/definitions/model.TrustPolicySyncResult'
+      trustPolicy:
+        $ref: '#/definitions/model.TrustPolicyCheck'
+    type: object
+  model.TrustPolicyBulkResult:
+    properties:
+      authMethod:
+        type: string
+      cspIdpConfigId:
+        type: integer
+      dryRun:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/model.TrustPolicyBulkItem'
+        type: array
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
+  model.TrustPolicyChange:
+    properties:
+      authMethod:
+        type: string
+      change:
+        description: statement_added | action_added | aud_set | aud_removed
+        type: string
+      detail:
+        type: string
+    type: object
   model.TrustPolicyCheck:
     properties:
       extra:
@@ -1945,6 +1955,45 @@ definitions:
         type: array
       status:
         description: ok | missing | mismatch | not_found | error
+        type: string
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
+  model.TrustPolicySyncRequest:
+    properties:
+      allowRegistered:
+        description: registered(빈 origin 포함) Role 도 바꾼다
+        type: boolean
+      dryRun:
+        description: 기본 true (쓰지 않고 변경안만)
+        type: boolean
+    type: object
+  model.TrustPolicySyncResult:
+    properties:
+      after:
+        additionalProperties: true
+        type: object
+      applied:
+        type: boolean
+      before:
+        additionalProperties: true
+        type: object
+      changes:
+        items:
+          $ref: '#/definitions/model.TrustPolicyChange'
+        type: array
+      cspRoleId:
+        type: integer
+      dryRun:
+        type: boolean
+      message:
+        type: string
+      roleName:
+        type: string
+      verdict:
+        description: 동기화 전 판정 (ok | missing | mismatch)
         type: string
       warnings:
         items:
@@ -2256,7 +2305,7 @@ info:
   contact: {}
   description: MC IAM Manager API Documentation
   title: MC IAM Manager API
-  version: 0.7.3
+  version: 0.7.4
 paths:
   /api/auth/certs:
     get:
@@ -3328,6 +3377,85 @@ paths:
       summary: Test CSP IDP connection
       tags:
       - csp-idp-configs
+  /api/csp-idp-configs/id/{configId}/trust-policy/check:
+    post:
+      consumes:
+      - application/json
+      description: Check every CSP target role of the IdP config against the statement
+        of this IdP config's auth method. Nothing is written. Management roles (protected)
+        and non-aws roles (invalid_request) are reported and skipped.
+      operationId: checkCspIdpConfigTrustPolicy
+      parameters:
+      - description: IdP config ID
+        in: path
+        name: configId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.TrustPolicyBulkResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Check trust policies of the target roles of an IdP config
+      tags:
+      - csp-idp-configs
+  /api/csp-idp-configs/id/{configId}/trust-policy/sync:
+    post:
+      consumes:
+      - application/json
+      description: Sync every CSP target role of the IdP config with the statement
+        of this IdP config's auth method (same rules as the single-role sync). dryRun
+        is true by default. Each item has a status (unchanged, would_change, applied,
+        registered_role, protected, not_found, invalid_request, error); one failure
+        does not stop the others. 400 when the IdP config is inactive.
+      operationId: syncCspIdpConfigTrustPolicy
+      parameters:
+      - description: IdP config ID
+        in: path
+        name: configId
+        required: true
+        type: string
+      - description: dryRun (default true), allowRegistered (default false)
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/model.TrustPolicySyncRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.TrustPolicyBulkResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Sync trust policies of the target roles of an IdP config
+      tags:
+      - csp-idp-configs
   /api/csp-idp-configs/list:
     post:
       consumes:
@@ -3883,11 +4011,66 @@ paths:
       summary: Sync CSP policies from cloud
       tags:
       - csp-policies
+  /api/csp-target-roles/id/{roleId}/trust-policy/sync:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Compare the AWS trust policy of the target role with the expected statements built from its IdP config (OIDC: Federated oidc_provider_arn, sts:AssumeRoleWithWebIdentity, <host>:aud = audience; SAML: Federated saml_provider_arn, sts:AssumeRoleWithSAML, SAML:aud) and fix only what differs.
+        Only Allow statements whose Federated is the expected provider are treated as IAM statements: the expected Action is added and the aud condition is set. Other statements and condition keys are kept. A missing statement is added.
+        dryRun is true by default (changes only). Nothing is written when the verdict is already ok.
+        Roles registered from an existing AWS role (origin registered or empty) need allowRegistered=true when there is something to change: 409 registered_role with before, after and changes.
+        409 protected for the management role, 400 when the IdP config is inactive or the expected statements cannot be built, 404 when the role does not exist in AWS, 502 when AWS fails.
+      operationId: syncCspTargetRoleTrustPolicy
+      parameters:
+      - description: CSP target role ID
+        in: path
+        name: roleId
+        required: true
+        type: string
+      - description: dryRun (default true), allowRegistered (default false)
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/model.TrustPolicySyncRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.TrustPolicySyncResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Sync the trust policy of a CSP target role
+      tags:
+      - csp-target-roles
   /api/csp/iam/roles:
     post:
       consumes:
       - application/json
-      description: CSP에 IAM 역할을 직접 생성합니다
+      description: 'Disabled (IAM-BUG-046): always 400. Use POST /api/roles/csp to
+        create or register a CSP role (the trust policy is built from the IdP config).'
       operationId: createCspIAMRole
       parameters:
       - description: CSP 계정 ID
@@ -3895,12 +4078,6 @@ paths:
         name: csp_account_id
         required: true
         type: integer
-      - description: IAM 역할 정보
-        in: body
-        name: role
-        required: true
-        schema:
-          $ref: '#/definitions/csp.Role'
       produces:
       - application/json
       responses:
@@ -3931,7 +4108,8 @@ paths:
     delete:
       consumes:
       - application/json
-      description: CSP에서 IAM 역할을 삭제합니다
+      description: 'Disabled (IAM-BUG-046): always 400. Use DELETE /api/roles/csp/id/{id}
+        (detaches IAM policies and keeps registered roles in AWS).'
       operationId: deleteCspIAMRole
       parameters:
       - description: IAM 역할명
@@ -3969,7 +4147,8 @@ paths:
     get:
       consumes:
       - application/json
-      description: CSP에서 특정 IAM 역할 정보를 조회합니다
+      description: Get an AWS IAM role with the management role of the account (active
+        aws OIDC IdP config). The trust policy is returned as is.
       operationId: getCspIAMRole
       parameters:
       - description: IAM 역할명
@@ -3988,7 +4167,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/csp.Role'
+            $ref: '#/definitions/model.AwsRoleView'
         "400":
           description: Bad Request
           schema:
@@ -4007,6 +4186,11 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties: true
+            type: object
       security:
       - BearerAuth: []
       summary: CSP IAM 역할 조회
@@ -4015,7 +4199,8 @@ paths:
     put:
       consumes:
       - application/json
-      description: CSP의 IAM 역할 정보를 수정합니다
+      description: 'Disabled (IAM-BUG-046): always 400. It replaced the whole trust
+        policy without Federated and Condition. Use POST /api/csp-target-roles/id/{id}/trust-policy/sync.'
       operationId: updateCspIAMRole
       parameters:
       - description: IAM 역할명
@@ -4028,12 +4213,6 @@ paths:
         name: csp_account_id
         required: true
         type: integer
-      - description: IAM 역할 수정 정보
-        in: body
-        name: role
-        required: true
-        schema:
-          $ref: '#/definitions/csp.Role'
       produces:
       - application/json
       responses:
