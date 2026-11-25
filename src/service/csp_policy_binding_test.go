@@ -21,6 +21,8 @@ import (
 
 // fakeAwsPolicyAPI AWS 정책 연결 호출을 기록한다. 각 err 를 채우면 그 호출이 실패한다.
 type fakeAwsPolicyAPI struct {
+	awsRoles                                                         map[string]*fakeAwsRoleState
+	listErr, deleteRoleErr                                           error
 	policies                                                         map[string]*fakeAwsPolicy
 	getPolicyErr, createPolicyErr, createVersionErr, deletePolicyErr error
 	calls                                                            []string
@@ -34,6 +36,11 @@ func (f *fakeAwsPolicyAPI) AttachRolePolicy(_ context.Context, in *iam.AttachRol
 	if f.attachErr != nil {
 		return nil, f.attachErr
 	}
+	if r := f.role(aws.ToString(in.RoleName)); r != nil {
+		if _, had := removeString(r.attached, aws.ToString(in.PolicyArn)); !had {
+			r.attached = append(r.attached, aws.ToString(in.PolicyArn))
+		}
+	}
 	return &iam.AttachRolePolicyOutput{}, nil
 }
 
@@ -41,6 +48,12 @@ func (f *fakeAwsPolicyAPI) DetachRolePolicy(_ context.Context, in *iam.DetachRol
 	f.calls = append(f.calls, "detach:"+aws.ToString(in.RoleName)+":"+aws.ToString(in.PolicyArn))
 	if f.detachErr != nil {
 		return nil, f.detachErr
+	}
+	if r := f.role(aws.ToString(in.RoleName)); r != nil {
+		var had bool
+		if r.attached, had = removeString(r.attached, aws.ToString(in.PolicyArn)); !had {
+			return nil, noSuchEntity
+		}
 	}
 	return &iam.DetachRolePolicyOutput{}, nil
 }
@@ -51,6 +64,11 @@ func (f *fakeAwsPolicyAPI) PutRolePolicy(_ context.Context, in *iam.PutRolePolic
 	if f.putErr != nil {
 		return nil, f.putErr
 	}
+	if r := f.role(aws.ToString(in.RoleName)); r != nil {
+		if _, had := removeString(r.inline, aws.ToString(in.PolicyName)); !had {
+			r.inline = append(r.inline, aws.ToString(in.PolicyName))
+		}
+	}
 	return &iam.PutRolePolicyOutput{}, nil
 }
 
@@ -58,6 +76,12 @@ func (f *fakeAwsPolicyAPI) DeleteRolePolicy(_ context.Context, in *iam.DeleteRol
 	f.calls = append(f.calls, "delete:"+aws.ToString(in.RoleName)+":"+aws.ToString(in.PolicyName))
 	if f.deleteErr != nil {
 		return nil, f.deleteErr
+	}
+	if r := f.role(aws.ToString(in.RoleName)); r != nil {
+		var had bool
+		if r.inline, had = removeString(r.inline, aws.ToString(in.PolicyName)); !had {
+			return nil, noSuchEntity
+		}
 	}
 	return &iam.DeleteRolePolicyOutput{}, nil
 }
@@ -193,6 +217,118 @@ func (f *fakeAwsPolicyAPI) DeletePolicy(_ context.Context, in *iam.DeletePolicyI
 	}
 	delete(f.policies, p.arn)
 	return &iam.DeletePolicyOutput{}, nil
+}
+
+// fakeAwsRoleState CspRole 삭제 테스트용 AWS Role 상태
+type fakeAwsRoleState struct {
+	attached []string // managed·custom 정책 ARN
+	inline   []string
+	profiles []string
+}
+
+func (f *fakeAwsPolicyAPI) role(name string) *fakeAwsRoleState {
+	if f.awsRoles == nil {
+		return nil
+	}
+	return f.awsRoles[name]
+}
+
+func (f *fakeAwsPolicyAPI) addRole(name string, attached, inline, profiles []string) *fakeAwsRoleState {
+	if f.awsRoles == nil {
+		f.awsRoles = map[string]*fakeAwsRoleState{}
+	}
+	r := &fakeAwsRoleState{attached: attached, inline: inline, profiles: profiles}
+	f.awsRoles[name] = r
+	return r
+}
+
+func removeString(list []string, v string) ([]string, bool) {
+	for i, x := range list {
+		if x == v {
+			return append(list[:i:i], list[i+1:]...), true
+		}
+	}
+	return list, false
+}
+
+// page 1개씩 돌려줘 페이지네이션을 확인한다
+func pageOf(list []string, marker *string) ([]string, *string) {
+	start := 0
+	if marker != nil {
+		fmt.Sscanf(*marker, "%d", &start)
+	}
+	if start >= len(list) {
+		return nil, nil
+	}
+	if start+1 < len(list) {
+		next := fmt.Sprintf("%d", start+1)
+		return list[start : start+1], &next
+	}
+	return list[start:], nil
+}
+
+func (f *fakeAwsPolicyAPI) ListAttachedRolePolicies(_ context.Context, in *iam.ListAttachedRolePoliciesInput, _ ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error) {
+	f.calls = append(f.calls, "listAttached:"+aws.ToString(in.RoleName))
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	r := f.role(aws.ToString(in.RoleName))
+	if r == nil {
+		return nil, noSuchEntity
+	}
+	items, next := pageOf(r.attached, in.Marker)
+	out := &iam.ListAttachedRolePoliciesOutput{IsTruncated: next != nil, Marker: next}
+	for _, a := range items {
+		out.AttachedPolicies = append(out.AttachedPolicies, iamtypes.AttachedPolicy{PolicyArn: aws.String(a), PolicyName: aws.String(roleNameFromArn(a))})
+	}
+	return out, nil
+}
+
+func (f *fakeAwsPolicyAPI) ListRolePolicies(_ context.Context, in *iam.ListRolePoliciesInput, _ ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error) {
+	f.calls = append(f.calls, "listInline:"+aws.ToString(in.RoleName))
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	r := f.role(aws.ToString(in.RoleName))
+	if r == nil {
+		return nil, noSuchEntity
+	}
+	items, next := pageOf(r.inline, in.Marker)
+	return &iam.ListRolePoliciesOutput{PolicyNames: items, IsTruncated: next != nil, Marker: next}, nil
+}
+
+func (f *fakeAwsPolicyAPI) ListInstanceProfilesForRole(_ context.Context, in *iam.ListInstanceProfilesForRoleInput, _ ...func(*iam.Options)) (*iam.ListInstanceProfilesForRoleOutput, error) {
+	f.calls = append(f.calls, "listProfiles:"+aws.ToString(in.RoleName))
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	r := f.role(aws.ToString(in.RoleName))
+	if r == nil {
+		return nil, noSuchEntity
+	}
+	items, next := pageOf(r.profiles, in.Marker)
+	out := &iam.ListInstanceProfilesForRoleOutput{IsTruncated: next != nil, Marker: next}
+	for _, p := range items {
+		out.InstanceProfiles = append(out.InstanceProfiles, iamtypes.InstanceProfile{InstanceProfileName: aws.String(p)})
+	}
+	return out, nil
+}
+
+func (f *fakeAwsPolicyAPI) DeleteRole(_ context.Context, in *iam.DeleteRoleInput, _ ...func(*iam.Options)) (*iam.DeleteRoleOutput, error) {
+	name := aws.ToString(in.RoleName)
+	f.calls = append(f.calls, "deleteRole:"+name)
+	if f.deleteRoleErr != nil {
+		return nil, f.deleteRoleErr
+	}
+	r := f.role(name)
+	if r == nil {
+		return nil, noSuchEntity
+	}
+	if len(r.attached)+len(r.inline)+len(r.profiles) > 0 {
+		return nil, &iamtypes.DeleteConflictException{Message: aws.String("must detach all policies first")}
+	}
+	delete(f.awsRoles, name)
+	return &iam.DeleteRoleOutput{}, nil
 }
 
 type bindingFixture struct {

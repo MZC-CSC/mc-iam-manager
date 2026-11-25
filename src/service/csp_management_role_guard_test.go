@@ -36,7 +36,7 @@ func TestCspRoleCRUD_ManagementRoleProtected(t *testing.T) {
 	legacy := &model.CspRole{Name: "mciam-platformadmin", CspType: "aws", Status: "created", IamIdentifier: testManagementRoleArn}
 	require.NoError(t, svc.db.Create(legacy).Error)
 	assert.True(t, IsCspRoleProtectedError(svc.UpdateCspRole(legacy.ID, &model.CreateCspRoleRequest{Description: "x"})))
-	assert.True(t, IsCspRoleProtectedError(svc.DeleteCspRole(legacy.ID)), "AWS DeleteRole 전에 막는다")
+	// 삭제 409 는 CspPolicyService.DeleteCspRole 테스트(csp_role_delete_test.go)로 옮겼다 (IAM-BUG-057)
 	var still model.CspRole
 	require.NoError(t, svc.db.First(&still, legacy.ID).Error)
 

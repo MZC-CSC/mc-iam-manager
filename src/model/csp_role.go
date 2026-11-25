@@ -44,6 +44,10 @@ type CspRole struct {
 	CspIdpConfig   *CspIdpConfig          `gorm:"foreignKey:CspIdpConfigID" json:"csp_idp_config,omitempty"`
 	ExtendedConfig map[string]interface{} `gorm:"type:jsonb;serializer:json" json:"extended_config,omitempty"`
 
+	// 출처 (IAM-BUG-057): created = IAM 이 CSP 에 만든 Role, registered = CSP 에 이미 있던 Role 을 등록.
+	// 빈 값(이전 레코드)은 registered 와 같이 다룬다. 삭제 시 created 만 CSP Role 까지 지운다.
+	Origin string `gorm:"column:origin;size:20" json:"origin"`
+
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	DeletedAt *time.Time `json:"deleted_at" gorm:"index"`
@@ -51,4 +55,18 @@ type CspRole struct {
 
 func (CspRole) TableName() string { // Renamed receiver
 	return "mcmp_role_csp_roles"
+}
+
+// CspRole 출처
+const (
+	CspRoleOriginCreated    = "created"
+	CspRoleOriginRegistered = "registered"
+)
+
+// CspRoleDeleteResult CspRole 삭제가 중간에 멈췄을 때(정책 해제 실패) 돌려주는 결과. 다 지우면 204 로 본문이 없다.
+type CspRoleDeleteResult struct {
+	Result         string                 `json:"result"` // detach_failed
+	CspRoleID      uint                   `json:"cspRoleId"`
+	BindingResults []*PolicyBindingResult `json:"bindingResults"`
+	Warnings       []string               `json:"warnings"`
 }

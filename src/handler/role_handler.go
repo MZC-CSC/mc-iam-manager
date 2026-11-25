@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -23,6 +22,8 @@ type RoleHandler struct {
 	keycloakService service.KeycloakService
 	menuService     *service.MenuService
 	cspRoleService  *service.CspRoleService
+	// cspPolicyService CspRole 삭제(정책 해제·AWS Role 삭제)에 쓴다 (IAM-BUG-057)
+	cspPolicyService *service.CspPolicyService
 }
 
 // NewRoleHandler create new RoleHandler instance
@@ -32,12 +33,14 @@ func NewRoleHandler(db *gorm.DB) *RoleHandler {
 	keycloakService := service.NewKeycloakService()
 	menuService := service.NewMenuService(db)
 	cspRoleService := service.NewCspRoleService(db, keycloakService)
+	cspPolicyService := service.NewCspPolicyService(db, service.NewCspIdpConfigService(db, keycloakService))
 	return &RoleHandler{
-		roleService:     roleService,
-		userService:     userService,
-		keycloakService: keycloakService,
-		menuService:     menuService,
-		cspRoleService:  cspRoleService,
+		roleService:      roleService,
+		userService:      userService,
+		keycloakService:  keycloakService,
+		menuService:      menuService,
+		cspRoleService:   cspRoleService,
+		cspPolicyService: cspPolicyService,
 	}
 }
 
@@ -1435,18 +1438,24 @@ func (h *RoleHandler) DeleteWorkspaceRole(c echo.Context) error {
 }
 
 // @Summary Delete csp role
-// @Description CspRole(mcmp_role_csp_roles) 레코드를 삭제합니다. 이 레코드를 참조하는 RoleMaster-CspRole
-// @Description 매핑을 먼저 정리한 뒤 레코드를 삭제하며, AWS인 경우 실제 클라우드 Role도 함께 삭제합니다.
-// @Description RoleMaster/RoleSub(csp)는 건드리지 않습니다 — 그 삭제는 DeleteCspRoleMaster를 사용하세요.
+// @Description Delete a CSP role (mcmp_role_csp_roles). Role masters and their csp sub are kept (use DeleteCspRoleMaster for those).
+// @Description 1) The management role (IdP Config role_arn) is protected: 409 protected.
+// @Description 2) Policies attached through IAM are detached in AWS first. If a detach fails, the attachment is kept with aws_status=detach_failed and the response is 200 with result=detach_failed, bindingResults and warnings; the CSP role and its role master mappings are kept. Send the request again after fixing the cause.
+// @Description 3) Roles that IAM created in AWS (origin=created): if the AWS role has policies or instance profiles that IAM did not attach, 409 conflict with unmanagedAttachedPolicies, unmanagedInlinePolicies and instanceProfiles, and nothing is changed. Otherwise the AWS role is deleted (already deleted in AWS is fine). A missing list permission returns 502 csp_error with the permission name.
+// @Description 4) Roles that already existed in AWS (origin=registered or empty): the AWS role is kept and only the IAM registration is removed.
+// @Description 5) Role master mappings, policy mappings and the CSP role row are deleted in one transaction: 204.
+// @Description 400 when the IdP config needed for AWS calls cannot be determined (set cspIdpConfigId with PUT /api/roles/csp/id/{roleId}).
 // @Tags roles
 // @Accept json
 // @Produce json
 // @Param roleId path string true "CSP Role ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} map[string]string
-// @Failure 404 {object} map[string]string
-// @Failure 500 {object} map[string]string
-// @Failure 409 {object} map[string]string "management role (IdP Config role_arn) is protected"
+// @Success 200 {object} model.CspRoleDeleteResult "a policy detach failed; nothing else was deleted"
+// @Failure 400 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Failure 409 {object} map[string]interface{} "management role, or the AWS role has policies or instance profiles that IAM did not attach"
+// @Failure 500 {object} map[string]interface{}
+// @Failure 502 {object} map[string]interface{}
 // @Security BearerAuth
 // @Router /api/roles/csp/id/{roleId} [delete]
 // @Id deleteCspRole
@@ -1454,40 +1463,26 @@ func (h *RoleHandler) DeleteCspRole(c echo.Context) error {
 	cspRoleIDInt, err := util.StringToUint(c.Param("roleId"))
 	if err != nil {
 		log.Printf("잘못된 csp 역할 ID 형식: %s", c.Param("roleId"))
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "잘못된 CSP Role ID 형식입니다"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "잘못된 CSP Role ID 형식입니다", "errorCode": "invalid_request"})
 	}
-
 	log.Printf("csp 역할 레코드 삭제 요청 - ID: %d", cspRoleIDInt)
 
-	existing, err := h.cspRoleService.GetCspRoleByID(cspRoleIDInt)
+	result, err := h.cspPolicyService.DeleteCspRole(cspRoleIDInt)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Printf("csp 역할을 찾을 수 없음 - ID: %d", cspRoleIDInt)
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "해당 ID의 CSP 역할을 찾을 수 없습니다"})
-		}
-		log.Printf("csp 역할 조회 실패 - ID: %d, 에러: %v", cspRoleIDInt, err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 조회 실패: %v", err)})
-	}
-	if existing == nil {
-		log.Printf("csp 역할을 찾을 수 없음 - ID: %d", cspRoleIDInt)
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "해당 ID의 CSP 역할을 찾을 수 없습니다"})
-	}
-
-	// 관리용 Role 은 매핑 삭제·AWS DeleteRole 전에 막는다 (409). 남은 매핑 해제는 DELETE /roles/csp-roles 로 한다
-	if err := h.cspRoleService.GuardCspRoleNotManagementRole(existing, "deleted"); err != nil {
-		return c.JSON(cspRoleErrorStatus(err), map[string]string{"error": err.Error()})
-	}
-
-	if err := h.roleService.DeleteRoleCspRoleMappingsByCspRoleID(cspRoleIDInt); err != nil {
-		log.Printf("csp 역할 매핑 삭제 실패 - ID: %d, 에러: %v", cspRoleIDInt, err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 매핑 삭제 실패: %v", err)})
-	}
-
-	if err := h.cspRoleService.DeleteCspRole(cspRoleIDInt); err != nil {
 		log.Printf("csp 역할 삭제 실패 - ID: %d, 에러: %v", cspRoleIDInt, err)
-		return c.JSON(cspRoleErrorStatus(err), map[string]string{"error": fmt.Sprintf("역할 삭제 실패: %v", err)})
+		if be, ok := service.AsPolicyBindingError(err); ok {
+			body := map[string]interface{}{"error": be.Msg, "errorCode": be.Code}
+			for k, v := range be.Details {
+				body[k] = v
+			}
+			return c.JSON(be.Status, body)
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error(), "errorCode": "db_error"})
 	}
-
+	if result != nil {
+		log.Printf("csp 역할 삭제 중단(정책 해제 실패) - ID: %d", cspRoleIDInt)
+		return c.JSON(http.StatusOK, result)
+	}
 	log.Printf("csp 역할 레코드 삭제 성공 - ID: %d", cspRoleIDInt)
 	return c.NoContent(http.StatusNoContent)
 }

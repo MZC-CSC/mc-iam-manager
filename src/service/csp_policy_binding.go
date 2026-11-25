@@ -41,6 +41,11 @@ type awsPolicyAPI interface {
 	ListPolicyVersions(ctx context.Context, params *iam.ListPolicyVersionsInput, optFns ...func(*iam.Options)) (*iam.ListPolicyVersionsOutput, error)
 	DeletePolicyVersion(ctx context.Context, params *iam.DeletePolicyVersionInput, optFns ...func(*iam.Options)) (*iam.DeletePolicyVersionOutput, error)
 	DeletePolicy(ctx context.Context, params *iam.DeletePolicyInput, optFns ...func(*iam.Options)) (*iam.DeletePolicyOutput, error)
+	// CspRole 삭제 (IAM-BUG-057)
+	ListAttachedRolePolicies(ctx context.Context, params *iam.ListAttachedRolePoliciesInput, optFns ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error)
+	ListRolePolicies(ctx context.Context, params *iam.ListRolePoliciesInput, optFns ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error)
+	ListInstanceProfilesForRole(ctx context.Context, params *iam.ListInstanceProfilesForRoleInput, optFns ...func(*iam.Options)) (*iam.ListInstanceProfilesForRoleOutput, error)
+	DeleteRole(ctx context.Context, params *iam.DeleteRoleInput, optFns ...func(*iam.Options)) (*iam.DeleteRoleOutput, error)
 }
 
 // 관리용 자격증명 세션 이름 (CloudTrail 에서 IAM 쓰기 주체로 보인다)
@@ -48,9 +53,10 @@ const policyBindingSessionName = "mcmp-iam-manager-session"
 
 // PolicyBindingError 기록 없이 거절하는 요청 오류. Status 는 HTTP 상태 코드다.
 type PolicyBindingError struct {
-	Status int
-	Code   string // invalid_request | not_found | protected | forbidden_policy | db_error
-	Msg    string
+	Status  int
+	Code    string // invalid_request | not_found | protected | forbidden_policy | conflict | db_error | csp_error
+	Msg     string
+	Details map[string]interface{} // 응답 본문에 함께 넣는 값 (예: 삭제를 막은 CSP 정책 목록)
 }
 
 func (e *PolicyBindingError) Error() string { return e.Msg }
@@ -220,8 +226,8 @@ func (s *CspPolicyService) prepareBinding(roleID, policyID uint, attach bool) (*
 		}
 		return nil, bindingErr(http.StatusInternalServerError, "db_error", "%v", err)
 	}
-	// TECH-049 (c): IAM 이 관리하는 mciam-* Role 에만 쓴다
-	if !strings.HasPrefix(role.Name, constants.CspRoleNamePrefix) {
+	// TECH-049 (c): IAM 이 관리하는 mciam-* Role 에만 쓴다 (AWS 실제 이름 기준)
+	if !strings.HasPrefix(awsRoleName(role), constants.CspRoleNamePrefix) {
 		return nil, bindingErr(http.StatusForbidden, "forbidden_policy", "CSP role %s is not an IAM-managed role; %s is only allowed on %s* roles",
 			role.Name, strings.TrimPrefix(action, "changed by "), constants.CspRoleNamePrefix)
 	}
@@ -275,7 +281,7 @@ func (s *CspPolicyService) prepareBinding(roleID, policyID uint, attach bool) (*
 		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "unsupported policy type %q", policy.PolicyType)
 	}
 
-	cfg, err := s.resolveBindingIdpConfig(role)
+	cfg, err := s.resolveBindingIdpConfig(role, attach)
 	if err != nil {
 		return nil, err
 	}
@@ -288,20 +294,36 @@ func (s *CspPolicyService) prepareBinding(roleID, policyID uint, attach bool) (*
 	return target, nil
 }
 
-// resolveBindingIdpConfig 대상 Role 의 소속 IdP Config. 없으면 활성 aws OIDC Config 가 1개일 때만 그것을 쓴다.
-func (s *CspPolicyService) resolveBindingIdpConfig(role *model.CspRole) (*model.CspIdpConfig, error) {
+// resolveBindingIdpConfig 대상 Role 에 AWS 를 쓸 관리용 자격증명의 IdP Config 를 정한다 (IAM-BUG-057).
+//  1. 소속 Config 가 활성 OIDC(role_arn 있음)이면 그것
+//  2. 소속 Config 가 SAML 이거나 없으면, 같은 CSP 계정의 활성 aws OIDC Config 가 1개일 때 그것 (계정도 모르면 전체에서 1개일 때). 대체하면 WARN
+//     소속 Config 가 비활성이면: 정리 작업(detach·CspRole 삭제)은 같은 규칙으로 대체하고,
+//     새 권한을 붙이는 작업(attach·inline 문서 반영, grant=true)은 400 이다 (관리자가 끈 연동을 우회하지 않는다)
+//  3. 그 밖에는 400 (PUT /api/roles/csp/id/:id 의 cspIdpConfigId 로 지정하도록 안내)
+func (s *CspPolicyService) resolveBindingIdpConfig(role *model.CspRole, grant bool) (*model.CspIdpConfig, error) {
+	usable := func(cfg *model.CspIdpConfig) bool {
+		return cfg != nil && cfg.IsActive && cfg.AuthMethod == model.AuthMethodOIDC && cfg.CspAccount != nil &&
+			cfg.CspAccount.CspType == "aws" && cfg.Config != nil && cfg.Config["role_arn"] != ""
+	}
+	accountID := role.CspAccountID
+	reason := "has no IdP config"
 	if role.CspIdpConfigID != nil {
 		cfg, err := s.cspIdpConfigRepo.GetByID(*role.CspIdpConfigID)
 		if err != nil {
 			return nil, bindingErr(http.StatusInternalServerError, "db_error", "failed to get IdP config: %v", err)
 		}
-		if cfg == nil || !cfg.IsActive || cfg.CspAccount == nil || cfg.CspAccount.CspType != "aws" {
-			return nil, bindingErr(http.StatusBadRequest, "invalid_request", "IdP config %d of CSP role %s is missing, inactive or not aws", *role.CspIdpConfigID, role.Name)
+		if usable(cfg) {
+			return cfg, nil
 		}
-		if cfg.Config == nil || cfg.Config["role_arn"] == "" {
-			return nil, bindingErr(http.StatusBadRequest, "invalid_request", "IdP config %d has no role_arn", cfg.ID)
+		if grant && cfg != nil && !cfg.IsActive {
+			return nil, bindingErr(http.StatusBadRequest, "invalid_request",
+				"the IdP config %d (%s) of CSP role %s is inactive; activate the IdP config, or set another cspIdpConfigId with PUT /api/roles/csp/id/%d",
+				cfg.ID, cfg.Name, role.Name, role.ID)
 		}
-		return cfg, nil
+		reason = fmt.Sprintf("IdP config %d is missing, inactive, not OIDC or has no role_arn", *role.CspIdpConfigID)
+		if cfg != nil && accountID == nil {
+			accountID = &cfg.CspAccountID
+		}
 	}
 	configs, err := s.cspIdpConfigRepo.GetActiveConfigs()
 	if err != nil {
@@ -309,19 +331,21 @@ func (s *CspPolicyService) resolveBindingIdpConfig(role *model.CspRole) (*model.
 	}
 	var candidates []*model.CspIdpConfig
 	for _, cfg := range configs {
-		if configMatches(cfg, "aws", constants.AuthMethodOIDC) {
+		if usable(cfg) && (accountID == nil || cfg.CspAccountID == *accountID) {
 			candidates = append(candidates, cfg)
 		}
 	}
+	scope := "in total"
+	if accountID != nil {
+		scope = fmt.Sprintf("for CSP account %d", *accountID)
+	}
 	if len(candidates) != 1 {
-		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "CSP role %s has no IdP config and %d active aws OIDC IdP configs were found; set the role's IdP config first", role.Name, len(candidates))
+		return nil, bindingErr(http.StatusBadRequest, "invalid_request",
+			"CSP role %s %s and %d active aws OIDC IdP configs were found %s; set cspIdpConfigId with PUT /api/roles/csp/id/%d first",
+			role.Name, reason, len(candidates), scope, role.ID)
 	}
-	cfg := candidates[0]
-	if cfg.Config == nil || cfg.Config["role_arn"] == "" {
-		return nil, bindingErr(http.StatusBadRequest, "invalid_request", "IdP config %d has no role_arn", cfg.ID)
-	}
-	log.Printf("[WARN] CSP role %s has no IdP config, using the only active aws OIDC IdP config (id=%d)", role.Name, cfg.ID)
-	return cfg, nil
+	log.Printf("[WARN] CSP role %s %s, using the only active aws OIDC IdP config %s (id=%d)", role.Name, reason, scope, candidates[0].ID)
+	return candidates[0], nil
 }
 
 // forbiddenInlineStatement Allow statement 의 Action 이 * 이거나 iam:* 이면, 또는 NotAction 을 쓰면 사유를 돌려준다.
@@ -372,7 +396,7 @@ func (s *CspPolicyService) applyPolicy(ctx context.Context, t *policyBindingTarg
 	}
 	switch t.policy.PolicyType {
 	case model.PolicyTypeManaged, model.PolicyTypeCustom:
-		_, err = api.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{RoleName: aws.String(t.role.Name), PolicyArn: aws.String(t.policy.PolicyArn)})
+		_, err = api.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{RoleName: aws.String(awsRoleName(t.role)), PolicyArn: aws.String(t.policy.PolicyArn)})
 	case model.PolicyTypeInline:
 		doc := t.inlineDoc
 		if doc == "" {
@@ -382,7 +406,7 @@ func (s *CspPolicyService) applyPolicy(ctx context.Context, t *policyBindingTarg
 			}
 			doc = string(b)
 		}
-		_, err = api.PutRolePolicy(ctx, &iam.PutRolePolicyInput{RoleName: aws.String(t.role.Name), PolicyName: aws.String(t.policy.Name), PolicyDocument: aws.String(doc)})
+		_, err = api.PutRolePolicy(ctx, &iam.PutRolePolicyInput{RoleName: aws.String(awsRoleName(t.role)), PolicyName: aws.String(t.policy.Name), PolicyDocument: aws.String(doc)})
 	}
 	return err
 }
@@ -395,9 +419,9 @@ func (s *CspPolicyService) removePolicy(ctx context.Context, t *policyBindingTar
 	}
 	switch t.policy.PolicyType {
 	case model.PolicyTypeManaged, model.PolicyTypeCustom:
-		_, err = api.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{RoleName: aws.String(t.role.Name), PolicyArn: aws.String(t.policy.PolicyArn)})
+		_, err = api.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{RoleName: aws.String(awsRoleName(t.role)), PolicyArn: aws.String(t.policy.PolicyArn)})
 	case model.PolicyTypeInline:
-		_, err = api.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{RoleName: aws.String(t.role.Name), PolicyName: aws.String(t.policy.Name)})
+		_, err = api.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{RoleName: aws.String(awsRoleName(t.role)), PolicyName: aws.String(t.policy.Name)})
 	}
 	return err
 }
@@ -469,4 +493,13 @@ func (s *CspPolicyService) otherRolesAttached(policyID, roleID uint) (int, error
 		}
 	}
 	return n, nil
+}
+
+// awsRoleName AWS 에서 쓰는 Role 이름. 저장된 ARN(iam_identifier)의 마지막 경로를 쓰고, 없으면 레코드 이름을 쓴다.
+// 레코드 이름이 바뀌어도(이전 동작) 실제 AWS Role 을 가리킨다 (IAM-BUG-057).
+func awsRoleName(role *model.CspRole) string {
+	if strings.HasPrefix(role.IamIdentifier, "arn:") && strings.Contains(role.IamIdentifier, ":role/") {
+		return roleNameFromArn(role.IamIdentifier)
+	}
+	return role.Name
 }

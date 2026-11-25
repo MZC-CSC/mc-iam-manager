@@ -262,6 +262,10 @@ func (s *CspRoleService) ensureAwsRole(api awsRoleAPI, req *model.CreateCspRoleR
 	if getErr == nil {
 		role.IdpIdentifier = resolveIdpIdentifier(role.Name, req.IdpIdentifier, idpConfig,
 			federatedFromTrustPolicy(aws.ToString(got.Role.AssumeRolePolicyDocument)))
+		// AWS 에 이미 있던 Role 을 등록한다 (IAM-BUG-057). IAM 이 만든 기존 레코드는 출처를 바꾸지 않는다
+		if role.Origin == "" {
+			role.Origin = model.CspRoleOriginRegistered
+		}
 		if role.ID == 0 {
 			role.Status = "created"
 			if err := s.cspRoleRepo.CreateCspRoleRecord(role); err != nil {
@@ -297,6 +301,8 @@ func (s *CspRoleService) ensureAwsRole(api awsRoleAPI, req *model.CreateCspRoleR
 	}); err != nil {
 		return fail(fmt.Errorf("failed to create AWS role %s: %w", req.CspRoleName, err))
 	}
+	// IAM 이 AWS 에 만든 Role (IAM-BUG-057, IAM-BUG-051 재생성 포함)
+	role.Origin = model.CspRoleOriginCreated
 	for i := 0; i < 30; i++ {
 		time.Sleep(awsRolePollInterval)
 		res, err := api.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(req.CspRoleName)})

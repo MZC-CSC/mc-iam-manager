@@ -884,6 +884,11 @@ definitions:
         type: integer
       name:
         type: string
+      origin:
+        description: |-
+          출처 (IAM-BUG-057): created = IAM 이 CSP 에 만든 Role, registered = CSP 에 이미 있던 Role 을 등록.
+          빈 값(이전 레코드)은 registered 와 같이 다룬다. 삭제 시 created 만 CSP Role 까지 지운다.
+        type: string
       path:
         type: string
       permissions:
@@ -902,6 +907,22 @@ definitions:
         type: array
       updated_at:
         type: string
+    type: object
+  model.CspRoleDeleteResult:
+    properties:
+      bindingResults:
+        items:
+          $ref: '#/definitions/model.PolicyBindingResult'
+        type: array
+      cspRoleId:
+        type: integer
+      result:
+        description: detach_failed
+        type: string
+      warnings:
+        items:
+          type: string
+        type: array
     type: object
   model.CspRolePolicy:
     properties:
@@ -6955,9 +6976,13 @@ paths:
       consumes:
       - application/json
       description: |-
-        CspRole(mcmp_role_csp_roles) 레코드를 삭제합니다. 이 레코드를 참조하는 RoleMaster-CspRole
-        매핑을 먼저 정리한 뒤 레코드를 삭제하며, AWS인 경우 실제 클라우드 Role도 함께 삭제합니다.
-        RoleMaster/RoleSub(csp)는 건드리지 않습니다 — 그 삭제는 DeleteCspRoleMaster를 사용하세요.
+        Delete a CSP role (mcmp_role_csp_roles). Role masters and their csp sub are kept (use DeleteCspRoleMaster for those).
+        1) The management role (IdP Config role_arn) is protected: 409 protected.
+        2) Policies attached through IAM are detached in AWS first. If a detach fails, the attachment is kept with aws_status=detach_failed and the response is 200 with result=detach_failed, bindingResults and warnings; the CSP role and its role master mappings are kept. Send the request again after fixing the cause.
+        3) Roles that IAM created in AWS (origin=created): if the AWS role has policies or instance profiles that IAM did not attach, 409 conflict with unmanagedAttachedPolicies, unmanagedInlinePolicies and instanceProfiles, and nothing is changed. Otherwise the AWS role is deleted (already deleted in AWS is fine). A missing list permission returns 502 csp_error with the permission name.
+        4) Roles that already existed in AWS (origin=registered or empty): the AWS role is kept and only the IAM registration is removed.
+        5) Role master mappings, policy mappings and the CSP role row are deleted in one transaction: 204.
+        400 when the IdP config needed for AWS calls cannot be determined (set cspIdpConfigId with PUT /api/roles/csp/id/{roleId}).
       operationId: deleteCspRole
       parameters:
       - description: CSP Role ID
@@ -6968,31 +6993,37 @@ paths:
       produces:
       - application/json
       responses:
+        "200":
+          description: a policy detach failed; nothing else was deleted
+          schema:
+            $ref: '#/definitions/model.CspRoleDeleteResult'
         "204":
           description: No Content
         "400":
           description: Bad Request
           schema:
-            additionalProperties:
-              type: string
+            additionalProperties: true
             type: object
         "404":
           description: Not Found
           schema:
-            additionalProperties:
-              type: string
+            additionalProperties: true
             type: object
         "409":
-          description: management role (IdP Config role_arn) is protected
+          description: management role, or the AWS role has policies or instance profiles
+            that IAM did not attach
           schema:
-            additionalProperties:
-              type: string
+            additionalProperties: true
             type: object
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
+            additionalProperties: true
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties: true
             type: object
       security:
       - BearerAuth: []
