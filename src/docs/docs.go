@@ -963,6 +963,74 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/csp-accounts/id/{accountId}/readiness": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "CSP 계정의 임시자격증명 연동 준비 상태를 단계별로 반환합니다 (쓰기 없음).\n① Keycloak OIDC 클라이언트 ② CSP 계정 ③ IdP Config ④ Provider 신뢰(연결 테스트) ⑤ CSP Role ⑥ 역할 매핑 ⑦ 실제 assume.\n대상 CSP Role 은 같은 CSP 타입이면서 csp_account_id 가 이 계정이거나 미기록인 역할입니다.\n④·⑦ 은 CSP 를 실제로 호출하므로 PlatformAdmin 일 때만 수행하고, ⑦ 은 checkIssue=true 일 때만 수행합니다. 자격증명은 반환하지 않습니다.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "csp-accounts"
+                ],
+                "summary": "Get CSP account readiness",
+                "operationId": "getCspAccountReadiness",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "accountId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "⑦ 실제 assume 수행 여부 (PlatformAdmin 만 유효)",
+                        "name": "checkIssue",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.CspAccountReadinessResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/csp-accounts/id/{accountId}/validate": {
             "post": {
                 "security": [
@@ -14246,6 +14314,47 @@ const docTemplate = `{
                 }
             }
         },
+        "model.CspAccountReadinessResponse": {
+            "type": "object",
+            "properties": {
+                "accountId": {
+                    "type": "integer"
+                },
+                "accountName": {
+                    "type": "string"
+                },
+                "canIssue": {
+                    "description": "CanIssue 실제 assume 에 성공하고 매핑도 있는 CSP Role 이 1개 이상. 확인하지 않았으면 null",
+                    "type": "boolean"
+                },
+                "canMapRoles": {
+                    "description": "CanMapRoles 설정이 끝난 CSP Role 이 1개 이상 있어 플랫폼 역할과 매핑할 수 있음",
+                    "type": "boolean"
+                },
+                "checkedAt": {
+                    "type": "string"
+                },
+                "cspRoles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.CspRoleReadiness"
+                    }
+                },
+                "cspType": {
+                    "type": "string"
+                },
+                "liveChecks": {
+                    "description": "LiveChecks CSP 실호출(④·⑦)을 수행할 권한이 있었는지 (PlatformAdmin)",
+                    "type": "boolean"
+                },
+                "stages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ReadinessStage"
+                    }
+                }
+            }
+        },
         "model.CspAccountValidationResponse": {
             "type": "object",
             "properties": {
@@ -14643,6 +14752,60 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "model.CspRoleReadiness": {
+            "type": "object",
+            "properties": {
+                "authMethod": {
+                    "type": "string"
+                },
+                "cspIdpConfigId": {
+                    "type": "integer"
+                },
+                "cspRoleId": {
+                    "type": "integer"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "issueDetail": {
+                    "type": "string"
+                },
+                "issueStatus": {
+                    "description": "⑦",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.ReadinessStatus"
+                        }
+                    ]
+                },
+                "linkage": {
+                    "type": "string"
+                },
+                "mappingCount": {
+                    "description": "⑥ 매핑된 플랫폼 역할 수",
+                    "type": "integer"
+                },
+                "mappingStatus": {
+                    "description": "⑥",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.ReadinessStatus"
+                        }
+                    ]
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "⑤ 역할 설정",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.ReadinessStatus"
+                        }
+                    ]
                 }
             }
         },
@@ -15506,6 +15669,57 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "model.ReadinessStage": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "guideAnchor": {
+                    "description": "CSP-Temporary-Credential-Guide-ko 절 번호",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nextAction": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/model.ReadinessStatus"
+                }
+            }
+        },
+        "model.ReadinessStatus": {
+            "type": "string",
+            "enum": [
+                "ok",
+                "failed",
+                "pending",
+                "skipped",
+                "not_applicable"
+            ],
+            "x-enum-comments": {
+                "ReadinessFailed": "확인했으나 미충족",
+                "ReadinessNotApplicable": "이 CSP·인증방식에는 해당 없음(미지원 포함)",
+                "ReadinessOK": "충족",
+                "ReadinessPending": "아직 진행 전(등록·매핑 없음, 또는 확인 요청 안 함)",
+                "ReadinessSkipped": "앞 단계 실패나 권한 부족으로 확인하지 않음"
+            },
+            "x-enum-varnames": [
+                "ReadinessOK",
+                "ReadinessFailed",
+                "ReadinessPending",
+                "ReadinessSkipped",
+                "ReadinessNotApplicable"
+            ]
         },
         "model.RemediationGuide": {
             "type": "object",

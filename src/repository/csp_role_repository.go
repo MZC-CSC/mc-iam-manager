@@ -569,3 +569,17 @@ func (r *CspRoleRepository) GetByCspAccountID(accountID uint) ([]*model.CspRole,
 	}
 	return roles, nil
 }
+
+// FindForAccountReadiness 계정 readiness 판정 대상 CspRole 조회 (CspIdpConfig Preload).
+// 같은 CSP 타입이면서 csp_account_id 가 이 계정이거나 미기록(NULL)인 역할을 반환한다.
+// 다른 계정에 명시적으로 연결된 역할은 제외한다.
+func (r *CspRoleRepository) FindForAccountReadiness(cspType string, accountID uint) ([]*model.CspRole, error) {
+	var roles []*model.CspRole
+	if err := r.db.Preload("CspIdpConfig").
+		Where("csp_type = ? AND (csp_account_id = ? OR csp_account_id IS NULL)", cspType, accountID).
+		Order("id").
+		Find(&roles).Error; err != nil {
+		return nil, fmt.Errorf("failed to get CSP roles for account readiness: %w", err)
+	}
+	return roles, nil
+}
