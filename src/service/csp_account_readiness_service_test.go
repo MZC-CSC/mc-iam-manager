@@ -443,3 +443,130 @@ func TestReadiness_AssumeRegion(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"us-east-1"}, f.assumer.regions)
 }
+
+// ── ⑦ 참고: 신뢰 정책 판정 (IAM-TECH-045 M2) ─────────────────────────────────
+
+type fakeRdTrust struct {
+	checks  map[uint]*model.TrustPolicyCheck // cspRoleID -> 판정
+	calls   []uint
+	methods []string
+}
+
+func (f *fakeRdTrust) VerifyTargetTrustPolicy(ctx context.Context, role *model.CspRole, methods ...string) *model.TrustPolicyCheck {
+	f.calls = append(f.calls, role.ID)
+	f.methods = append(f.methods, methods...)
+	if c, ok := f.checks[role.ID]; ok {
+		return c
+	}
+	return &model.TrustPolicyCheck{Status: model.TrustPolicyOK}
+}
+
+func withTrust(f *rdFixture) *fakeRdTrust {
+	tr := &fakeRdTrust{checks: map[uint]*model.TrustPolicyCheck{}}
+	f.svc.trust = tr
+	return tr
+}
+
+func TestReadiness_Trust_OK(t *testing.T) {
+	f := newRdFixture()
+	tr := withTrust(f)
+	resp, err := f.svc.GetReadiness(context.Background(), 1, adminIssue)
+	require.NoError(t, err)
+	require.NotNil(t, resp.CspRoles[0].TrustPolicy)
+	assert.Equal(t, model.TrustPolicyOK, resp.CspRoles[0].TrustPolicy.Status)
+	assert.Empty(t, resp.CspRoles[0].TrustPolicy.NextAction)
+	assert.Equal(t, []string{"OIDC"}, tr.methods, "역할의 인증 방식만 본다")
+	assert.Equal(t, model.ReadinessOK, stageStatus(t, resp)[7])
+}
+
+// assume 실패 + 신뢰 정책 mismatch: 원인을 trustPolicy 로 구분하고 재동기화 API 를 안내한다
+func TestReadiness_Trust_MismatchExplainsAssumeFailure(t *testing.T) {
+	f := newRdFixture()
+	f.assumer.errs[rdRole] = errors.New("AccessDenied: Not authorized to perform sts:AssumeRoleWithWebIdentity")
+	tr := withTrust(f)
+	tr.checks[100] = &model.TrustPolicyCheck{Status: model.TrustPolicyMismatch, Statements: []model.TrustStatementCheck{
+		{AuthMethod: "OIDC", Status: model.TrustPolicyMismatch, Message: "aud condition kc.example.com/auth/realms/mciam:aud is missing"}}}
+	resp, err := f.svc.GetReadiness(context.Background(), 1, adminIssue)
+	require.NoError(t, err)
+
+	rr := resp.CspRoles[0]
+	assert.Equal(t, model.ReadinessFailed, rr.IssueStatus, "⑦ 은 실제 assume 결과 그대로")
+	require.NotNil(t, rr.TrustPolicy)
+	assert.Equal(t, model.TrustPolicyMismatch, rr.TrustPolicy.Status)
+	assert.Contains(t, rr.TrustPolicy.Detail, "aud condition")
+	assert.Contains(t, rr.TrustPolicy.NextAction, "/api/csp-target-roles/id/100/trust-policy/sync")
+	st7 := resp.Stages[6]
+	assert.Equal(t, model.ReadinessFailed, st7.Status)
+	assert.Contains(t, st7.NextAction, "trust-policy/sync")
+}
+
+// 조회 실패는 trustPolicy.status=error 로만 표시하고 ⑦ 판정은 바꾸지 않는다
+func TestReadiness_Trust_ErrorDoesNotChangeStage(t *testing.T) {
+	f := newRdFixture()
+	tr := withTrust(f)
+	tr.checks[100] = &model.TrustPolicyCheck{Status: model.TrustPolicyError, Message: "the management role is not allowed to call iam:GetRole"}
+	resp, err := f.svc.GetReadiness(context.Background(), 1, adminIssue)
+	require.NoError(t, err)
+	assert.Equal(t, model.ReadinessOK, stageStatus(t, resp)[7])
+	assert.Equal(t, model.ReadinessOK, resp.CspRoles[0].IssueStatus)
+	require.NotNil(t, resp.CspRoles[0].TrustPolicy)
+	assert.Equal(t, model.TrustPolicyError, resp.CspRoles[0].TrustPolicy.Status)
+	assert.Contains(t, resp.CspRoles[0].TrustPolicy.Detail, "iam:GetRole")
+	assert.Empty(t, resp.Stages[6].NextAction)
+}
+
+// SAML Role 은 ⑦ 실제 발급 검사를 지원하지 않지만 신뢰 정책 판정은 보여 준다
+func TestReadiness_Trust_SamlRoleShown(t *testing.T) {
+	f := newRdFixture()
+	saml := &model.CspIdpConfig{ID: 11, Name: "aws-saml", CspAccountID: 1, AuthMethod: model.AuthMethodSAML, IsActive: true,
+		Config: map[string]string{"saml_provider_arn": "arn:aws:iam::111122223333:saml-provider/kc"}}
+	f.configs.configs = append(f.configs.configs, saml)
+	f.roles.roles = append(f.roles.roles, &model.CspRole{ID: 101, Name: "mciam-saml", CspType: "aws", Status: "created",
+		IdpIdentifier: "arn:aws:iam::111122223333:saml-provider/kc", IamIdentifier: "arn:aws:iam::111122223333:role/mciam-saml",
+		CspAccountID: uintP(1), CspIdpConfigID: uintP(11), CspIdpConfig: saml,
+		ExtendedConfig: map[string]interface{}{"saml_client_id": "urn:amazon:webservices"}})
+	tr := withTrust(f)
+	tr.checks[101] = &model.TrustPolicyCheck{Status: model.TrustPolicyMissing, Message: "no statement trusts the SAML provider"}
+	resp, err := f.svc.GetReadiness(context.Background(), 1, adminIssue)
+	require.NoError(t, err)
+	require.Len(t, resp.CspRoles, 2)
+	sr := resp.CspRoles[1]
+	assert.Equal(t, model.ReadinessNotApplicable, sr.IssueStatus)
+	require.NotNil(t, sr.TrustPolicy)
+	assert.Equal(t, model.TrustPolicyMissing, sr.TrustPolicy.Status)
+	assert.Contains(t, sr.TrustPolicy.Detail, "SAML provider")
+	assert.Contains(t, sr.TrustPolicy.NextAction, "/api/csp-target-roles/id/101/")
+	assert.Equal(t, []string{"OIDC", "SAML"}, tr.methods)
+	assert.Equal(t, model.ReadinessOK, stageStatus(t, resp)[7], "OIDC Role assume 성공이면 ⑦ ok, SAML 판정은 참고")
+}
+
+// checkIssue 없이, 또는 PlatformAdmin 이 아니면 AWS 조회를 하지 않는다
+func TestReadiness_Trust_OnlyWithLiveCheckIssue(t *testing.T) {
+	for _, opts := range []ReadinessOptions{{LiveChecks: true}, {LiveChecks: false, CheckIssue: true}} {
+		f := newRdFixture()
+		tr := withTrust(f)
+		resp, err := f.svc.GetReadiness(context.Background(), 1, opts)
+		require.NoError(t, err)
+		assert.Empty(t, tr.calls, "%+v", opts)
+		assert.Nil(t, resp.CspRoles[0].TrustPolicy)
+	}
+}
+
+// 설정 미완료(⑤ failed) Role 과 비 AWS 는 판정하지 않는다
+func TestReadiness_Trust_SkipsNotReadyAndNonAws(t *testing.T) {
+	f := newRdFixture()
+	f.roles.roles[0].IamIdentifier = ""
+	tr := withTrust(f)
+	_, err := f.svc.GetReadiness(context.Background(), 1, adminIssue)
+	require.NoError(t, err)
+	assert.Empty(t, tr.calls)
+
+	g := newRdFixture()
+	g.account.CspType = "gcp"
+	g.account.AccountInfo = map[string]string{"project_id": "p1"}
+	g.roles.roles[0].CspType = "gcp"
+	tr2 := withTrust(g)
+	_, err = g.svc.GetReadiness(context.Background(), 1, adminIssue)
+	require.NoError(t, err)
+	assert.Empty(t, tr2.calls)
+}
