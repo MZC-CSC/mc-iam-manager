@@ -255,7 +255,7 @@ curl https://<your domain or localhost>:<port>/readyz
 
 1. **CSP 콘솔 설정**
    - IAM 메뉴에 IDP 설정 추가
-   - IAM 역할 추가 (prefix: `mciam_`)
+   - IAM 역할 추가 (prefix: `mciam-`). IAM Manager 는 `mciam-<role>` 을 만들고 매핑한다. 이름이 `mciam_*` 인 역할은 IAM Manager 가 관리하지 않는다
    - 역할 권한 설정
    - Trust Relation 설정
 
@@ -379,7 +379,7 @@ CSP 정책(AWS IAM 정책)은 IAM Manager 에 등록하고 CSP 역할에 연결�
 |---|---|---|---|
 | `inline` | CSP 역할 **1개** 전용 사본 | `name`, `policy_doc` | 생성, 문서 수정, 역할 1개에 연결·해제 |
 | `managed` | AWS 관리형 정책(`arn:aws:iam::aws:policy/...`) | `name`, `policy_arn` | 등록, 연결·해제. **문서 수정 불가** |
-| `custom` | 고객 관리형 정책, 여러 역할이 공유 | (A) `name` + `policy_doc`: IAM Manager 가 AWS 에 `mciam-<name>` 생성<br>(B) `name` + `policy_arn`: 기존 정책 등록 | 생성·문서 수정·삭제는 `mciam-*` 만, 연결·해제는 모두 |
+| `custom` | 고객 관리형 정책, 여러 역할이 공유 | (A) `name` + `policy_doc`: IAM Manager 가 AWS 에 `mciam-<name>` 생성(`name` 이 `mciam-` 로 시작하지 않을 때만 접두사를 붙임)<br>(B) `name` + `policy_arn`: 기존 정책 등록 | 생성·문서 수정·삭제는 `mciam-*` 만, 연결·해제는 모두 |
 
 - inline 정책은 CSP 역할 1개에만 연결된다. 두 번째 역할에 연결하면 `400`("An inline policy can be attached to only one CSP Role…")이다. 여러 역할이 같은 권한을 쓰려면 `custom` 정책을 쓴다.
 - `managed` 는 AWS 관리형 ARN 만 받는다. AWS 에 없는 ARN 도 등록은 되지만, 연결할 때 AWS 에서 실패한다([AWS 반영 실패도 200](#aws-반영-실패도-200) 참고).
@@ -387,18 +387,19 @@ CSP 정책(AWS IAM 정책)은 IAM Manager 에 등록하고 CSP 역할에 연결�
 ### 범위와 거부 규칙
 
 - IAM Manager 는 IAM 이 관리하는 리소스에만 쓴다.
-  - 연결·해제는 이름이 `mciam-*` 인 CSP 역할에만 된다. 다른 역할은 `403 forbidden_policy`.
-  - `custom` 정책의 AWS 생성·수정·삭제는 `mciam-*` 정책에만 된다. IAM 밖 고객 관리형 정책은 바꾸지 않는다.
+  - 연결·해제는 이름이 `mciam-*` 인 CSP 역할에만 된다. 다른 역할은 `403 forbidden_policy`. `mciam-*` 밖의 정책도 등록·연결·해제는 된다.
+  - `custom` 정책의 AWS 생성·수정·삭제는 `mciam-*` 정책에만 된다. IAM 밖 고객 관리형 정책은 바꾸지 않고, 삭제하면 IAM 기록만 지운다.
   - 관리용 Role 은 대상이 될 수 없다: `409 protected`.
-- 거부 정책(`403 forbidden_policy`). 연결할 때와 생성·수정할 때 검사한다.
-  - AWS 관리형 `AdministratorAccess`, `IAMFullAccess`, `PowerUserAccess`
-  - `Allow` statement 의 `Action` 이 `*` 또는 `iam:*` 이거나 `NotAction` 을 쓰는 문서
+- 거부 정책(`403 forbidden_policy`)
+  - AWS 관리형 `AdministratorAccess`, `IAMFullAccess`, `PowerUserAccess`: 등록은 되고, 연결하면 `403` 이다(해제는 된다).
+  - `Allow` statement 의 `Action` 이 `*` 또는 `iam:*` 이거나 `NotAction` 을 쓰는 문서: 생성·수정(`inline`, `custom`)과 `inline` 연결 때 거부한다.
 - 사용 중인 정책 변경(`409 conflict`)
-  - 역할에 연결된 상태에서 이름·ARN 변경. 먼저 해제한 뒤 바꾼다.
-  - 연결된 상태(IAM 안, 또는 IAM 밖 AWS 연결)에서 삭제. `custom` 정책은 IAM 매핑이 없고 AWS `AttachmentCount` 가 0 일 때만 삭제된다.
+  - 사용 중은 AWS 에 연결된 상태(`aws_status` 가 `applied`, `detach_failed` 또는 빈 값)를 뜻한다. AWS 반영에 실패한 연결(`failed`)은 변경을 막지 않는다. ARN 이나 이름을 고친 뒤 연결을 다시 요청한다.
+  - 사용 중에 이름·ARN 변경. 먼저 해제한 뒤 바꾼다.
+  - 역할에 연결된 상태(`aws_status` 와 관계없이, `failed` 포함) 또는 IAM 밖 AWS 연결이 남은 상태에서 삭제. `custom` 정책은 IAM 매핑이 없고 AWS `AttachmentCount` 가 0 일 때만 삭제된다.
   - 이미 있는 이름으로 생성
   - 이미 여러 역할에 연결된 inline 정책(기존 데이터)의 문서 수정
-- `custom` 정책 이름 변경은 `400` 이다.
+- 이름 변경: `custom` 은 `400`(AWS 정책은 이름을 바꿀 수 없다. ARN 이 없는 이전 `custom` 행은 DB 이름만 바뀐다), `inline` 은 사용 중이면 `409 conflict`, `managed` 는 된다(IAM 라벨만 바뀐다).
 - Sync(`POST /api/csp-policies/sync`)는 CSP 계정 1개의 정책을 가져온다. `policy_scope: "Local"`(기본값)은 `mciam-*` 고객 관리형 정책만 `custom` 으로, `AWS` 는 AWS 관리형 정책을 `managed` 로, `All` 은 둘 다 가져온다. 계정 + ARN 으로 기존 행과 맞춘다.
 
 ### API 목록
@@ -427,12 +428,12 @@ CSP 정책(AWS IAM 정책)은 IAM Manager 에 등록하고 CSP 역할에 연결�
 | HTTP | `errorCode` | 경우 |
 |---|---|---|
 | 400 | `invalid_request` | 필수값 누락·형식 오류, inline 정책의 두 번째 역할 연결, `managed` 문서 수정, `custom` 이름 변경 |
-| 403 | `forbidden_policy` | `mciam-*` 밖의 역할·정책, 거부 정책, `Action: *`·`iam:*`·`NotAction` 문서 |
-| 404 | `not_found` | 역할·정책이 없음, 또는 해제 시 역할에 연결돼 있지 않음 |
-| 409 | `conflict` | 연결 중 이름·ARN 변경·삭제, 같은 이름, 여러 역할에 연결된 inline 문서 수정 |
+| 403 | `forbidden_policy` | `mciam-*` 밖의 역할(연결·해제), `mciam-*` 밖 `custom` 정책의 문서 수정, 거부 정책, `Action: *`·`iam:*`·`NotAction` 문서 |
+| 404 | `not_found` | 역할·정책이 없음, 또는 해제 시 역할에 연결돼 있지 않음, 또는 문서 조회 시 AWS 에 정책이 없음 |
+| 409 | `conflict` | 사용 중 이름·ARN 변경, 역할에 연결된 상태에서 삭제, IAM 밖 AWS 연결이 남은 상태에서 삭제, 같은 이름, 여러 역할에 연결된 inline 문서 수정 |
 | 409 | `protected` | 대상이 관리용 Role |
 | 500 | `db_error` | DB 갱신 실패(AWS 변경은 되돌림) |
-| 502 | `csp_error` | `custom` 정책 생성·수정·삭제 중 AWS 호출 실패(DB 는 바꾸지 않음) |
+| 502 | `csp_error` | `custom` 정책 생성·수정·삭제, AWS 문서 조회, sync 정책 목록 조회 중 AWS 호출 실패(DB 는 바꾸지 않음) |
 
 ### AWS 반영 실패도 200
 
@@ -478,8 +479,9 @@ IAM Manager 는 관리용 Role(`mciam-admin`)로 AWS 를 호출한다. CSP 역�
 - `arn:aws:iam::<account-id>:role/mciam-*` 에 연결·해제: `iam:AttachRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePolicy`, `iam:DeleteRolePolicy`
 - `arn:aws:iam::<account-id>:policy/mciam-*` 에 정책 정의: 생성, 버전 생성·조회·삭제, 조회, 삭제(`iam:CreatePolicy`, `iam:CreatePolicyVersion`, `iam:ListPolicyVersions`, `iam:DeletePolicyVersion`, `iam:GetPolicy`, `iam:GetPolicyVersion`, `iam:DeletePolicy`)
 - `*` 에 `iam:ListPolicies`(sync)
+- `arn:aws:iam::aws:policy/*` 에 AWS 관리형 정책 문서 조회: `iam:GetPolicy`, `iam:GetPolicyVersion`
 
-권한이 없으면 위 방식대로 실패한다(`200` + `failed`, 또는 `502 csp_error`).
+권한이 없으면 위 방식대로 실패한다(`200` + `failed`, 또는 `502 csp_error`). AWS 문서 조회도 `502 csp_error` 다.
 
 ### 기존 데이터
 

@@ -254,7 +254,7 @@ curl https://<your domain or localhost>:<port>/readyz
 
 1. **CSP Console Configuration**
    - Add IDP configuration in IAM menu
-   - Add IAM roles (prefix: `mciam_`)
+   - Add IAM roles (prefix: `mciam-`). IAM Manager creates and maps `mciam-<role>`; roles named `mciam_*` are not managed by IAM Manager
    - Configure role permissions
    - Configure Trust Relation settings
 
@@ -378,7 +378,7 @@ CSP policies (AWS IAM policies) are registered in IAM Manager and attached to CS
 |---|---|---|---|
 | `inline` | A private copy for **one** CSP Role | `name`, `policy_doc` | Create, edit document, attach to / detach from one Role |
 | `managed` | AWS managed policy (`arn:aws:iam::aws:policy/...`) | `name`, `policy_arn` | Register, attach, detach. **The document cannot be edited** |
-| `custom` | Customer managed policy, shared by many Roles | (A) `name` + `policy_doc`: IAM Manager creates `mciam-<name>` in AWS<br>(B) `name` + `policy_arn`: registers an existing policy | Create, edit document, delete: `mciam-*` only. Attach / detach: any |
+| `custom` | Customer managed policy, shared by many Roles | (A) `name` + `policy_doc`: IAM Manager creates `mciam-<name>` in AWS (the prefix is added only when `name` does not start with `mciam-`)<br>(B) `name` + `policy_arn`: registers an existing policy | Create, edit document, delete: `mciam-*` only. Attach / detach: any |
 
 - An inline policy can be attached to only one CSP Role. Attaching it to a second Role returns `400` ("An inline policy can be attached to only one CSP Role…"). Use a `custom` policy to share permissions between Roles.
 - `managed` accepts AWS managed ARNs only. Registering an ARN that does not exist succeeds, but the later attach fails in AWS (see [AWS Failures Return 200](#aws-failures-return-200)).
@@ -386,18 +386,19 @@ CSP policies (AWS IAM policies) are registered in IAM Manager and attached to CS
 ### Scope and Guard Rules
 
 - IAM Manager writes only to IAM-managed resources.
-  - Attach / detach work only on CSP Roles named `mciam-*`. Other Roles: `403 forbidden_policy`.
-  - Creating, editing and deleting `custom` policies in AWS works only on `mciam-*` policies. Customer managed policies outside IAM are never changed.
+  - Attach / detach work only on CSP Roles named `mciam-*`. Other Roles: `403 forbidden_policy`. Policies outside `mciam-*` can still be registered, attached and detached.
+  - Creating, editing and deleting `custom` policies in AWS works only on `mciam-*` policies. Customer managed policies outside IAM are never changed; deleting one removes only the IAM record.
   - The management role cannot be a target: `409 protected`.
-- Denied policies (`403 forbidden_policy`), checked on attach and on create / update
-  - AWS managed `AdministratorAccess`, `IAMFullAccess`, `PowerUserAccess`
-  - Documents with an `Allow` statement whose `Action` is `*` or `iam:*`, or that use `NotAction`
+- Denied policies (`403 forbidden_policy`)
+  - AWS managed `AdministratorAccess`, `IAMFullAccess`, `PowerUserAccess`: can be registered, attach returns `403` (detach is allowed)
+  - Documents with an `Allow` statement whose `Action` is `*` or `iam:*`, or that use `NotAction`: rejected on create and update (`inline`, `custom`) and on `inline` attach
 - Changes to a policy in use (`409 conflict`)
-  - Changing the name or ARN while the policy is attached to a Role. Detach first, then change.
-  - Deleting a policy while it is attached (in IAM, or in AWS outside IAM). A `custom` policy is deleted only when it has no IAM mapping and its AWS `AttachmentCount` is 0.
+  - A policy is in use while it is attached in AWS (`aws_status` `applied`, `detach_failed` or empty). Attachments that failed to apply (`failed`) do not block changes; fix the ARN or name, then send the attach request again.
+  - Changing the name or ARN while the policy is in use. Detach first, then change.
+  - Deleting a policy while it is attached to a Role (any `aws_status`, including `failed`), or in AWS outside IAM. A `custom` policy is deleted only when it has no IAM mapping and its AWS `AttachmentCount` is 0.
   - Creating a policy with a name that already exists
   - Editing the document of an inline policy that is already attached to more than one Role (old data)
-- Renaming a `custom` policy is rejected with `400`.
+- Renaming: `custom` → `400` (AWS policies cannot be renamed; older `custom` rows without an ARN change only in the DB); `inline` → `409 conflict` while in use; `managed` → allowed (only the IAM label changes).
 - Sync (`POST /api/csp-policies/sync`) imports policies of one CSP account. `policy_scope: "Local"` (default) imports only `mciam-*` customer managed policies as `custom`; `AWS` imports AWS managed policies as `managed`; `All` does both. Policies are matched by account + ARN.
 
 ### API Reference
@@ -426,12 +427,12 @@ All errors have the form `{error, errorCode}`.
 | HTTP | `errorCode` | When |
 |---|---|---|
 | 400 | `invalid_request` | Missing or invalid fields, second Role for an inline policy, document edit on `managed`, `custom` rename |
-| 403 | `forbidden_policy` | Role or policy outside `mciam-*`, denied policy, document with `Action: *` / `iam:*` / `NotAction` |
-| 404 | `not_found` | Role or policy not found, or the policy is not attached to the Role (detach) |
-| 409 | `conflict` | Name / ARN change or delete while attached, duplicate name, multi-Role inline document edit |
+| 403 | `forbidden_policy` | Role outside `mciam-*` (attach / detach), document edit of a `custom` policy outside `mciam-*`, denied policy, document with `Action: *` / `iam:*` / `NotAction` |
+| 404 | `not_found` | Role or policy not found, or the policy is not attached to the Role (detach), or the policy does not exist in AWS (document) |
+| 409 | `conflict` | Name / ARN change while in use, delete while attached to a Role, delete while the policy is attached to AWS entities outside IAM, duplicate name, multi-Role inline document edit |
 | 409 | `protected` | The target is the management role |
 | 500 | `db_error` | DB update failed (the AWS change is reverted) |
-| 502 | `csp_error` | AWS call failed while creating, updating or deleting a `custom` policy (the DB is not changed) |
+| 502 | `csp_error` | AWS call failed while creating, updating or deleting a `custom` policy, reading a document from AWS, or listing policies for sync (the DB is not changed) |
 
 ### AWS Failures Return 200
 
@@ -477,8 +478,9 @@ IAM Manager calls AWS with the management role (`mciam-admin`). Besides the role
 - Attach / detach on `arn:aws:iam::<account-id>:role/mciam-*`: `iam:AttachRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePolicy`, `iam:DeleteRolePolicy`
 - Policy definitions on `arn:aws:iam::<account-id>:policy/mciam-*`: create, version create / list / delete, get and delete (`iam:CreatePolicy`, `iam:CreatePolicyVersion`, `iam:ListPolicyVersions`, `iam:DeletePolicyVersion`, `iam:GetPolicy`, `iam:GetPolicyVersion`, `iam:DeletePolicy`)
 - `iam:ListPolicies` on `*` (sync)
+- AWS managed policy documents on `arn:aws:iam::aws:policy/*`: `iam:GetPolicy`, `iam:GetPolicyVersion`
 
-Without these permissions, the calls fail as described above (`200` with `failed`, or `502 csp_error`).
+Without these permissions, the calls fail as described above (`200` with `failed`, or `502 csp_error`). Reading a document from AWS also returns `502 csp_error`.
 
 ### Existing Data
 
