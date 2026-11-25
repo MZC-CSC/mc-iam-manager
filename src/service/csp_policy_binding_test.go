@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -19,9 +21,11 @@ import (
 
 // fakeAwsPolicyAPI AWS 정책 연결 호출을 기록한다. 각 err 를 채우면 그 호출이 실패한다.
 type fakeAwsPolicyAPI struct {
-	calls                                   []string
-	attachErr, detachErr, putErr, deleteErr error
-	lastPutDoc, lastPutName, lastAttachArn  string
+	policies                                                         map[string]*fakeAwsPolicy
+	getPolicyErr, createPolicyErr, createVersionErr, deletePolicyErr error
+	calls                                                            []string
+	attachErr, detachErr, putErr, deleteErr                          error
+	lastPutDoc, lastPutName, lastAttachArn                           string
 }
 
 func (f *fakeAwsPolicyAPI) AttachRolePolicy(_ context.Context, in *iam.AttachRolePolicyInput, _ ...func(*iam.Options)) (*iam.AttachRolePolicyOutput, error) {
@@ -56,6 +60,139 @@ func (f *fakeAwsPolicyAPI) DeleteRolePolicy(_ context.Context, in *iam.DeleteRol
 		return nil, f.deleteErr
 	}
 	return &iam.DeleteRolePolicyOutput{}, nil
+}
+
+// fakeAwsPolicy 고객 관리형 정책 (버전 포함)
+type fakeAwsPolicy struct {
+	name, arn   string
+	attachments int32
+	versions    []iamtypes.PolicyVersion // CreateDate 오름차순
+	docs        map[string]string
+	nextVersion int
+}
+
+func (f *fakeAwsPolicyAPI) policyStore() map[string]*fakeAwsPolicy {
+	if f.policies == nil {
+		f.policies = map[string]*fakeAwsPolicy{}
+	}
+	return f.policies
+}
+
+func (f *fakeAwsPolicyAPI) addPolicy(name, arn, doc string, versions int) *fakeAwsPolicy {
+	p := &fakeAwsPolicy{name: name, arn: arn, docs: map[string]string{}}
+	for i := 0; i < versions; i++ {
+		p.addVersion(doc, i == versions-1)
+	}
+	f.policyStore()[arn] = p
+	return p
+}
+
+func (p *fakeAwsPolicy) addVersion(doc string, setDefault bool) {
+	p.nextVersion++
+	id := fmt.Sprintf("v%d", p.nextVersion)
+	if setDefault {
+		for i := range p.versions {
+			p.versions[i].IsDefaultVersion = false
+		}
+	}
+	created := time.Date(2026, 1, 1, 0, p.nextVersion, 0, 0, time.UTC)
+	p.versions = append(p.versions, iamtypes.PolicyVersion{VersionId: aws.String(id), IsDefaultVersion: setDefault, CreateDate: &created})
+	p.docs[id] = doc
+}
+
+func (p *fakeAwsPolicy) defaultDoc() string {
+	for _, v := range p.versions {
+		if v.IsDefaultVersion {
+			return p.docs[aws.ToString(v.VersionId)]
+		}
+	}
+	return ""
+}
+
+func (f *fakeAwsPolicyAPI) GetPolicy(_ context.Context, in *iam.GetPolicyInput, _ ...func(*iam.Options)) (*iam.GetPolicyOutput, error) {
+	f.calls = append(f.calls, "getPolicy:"+aws.ToString(in.PolicyArn))
+	if f.getPolicyErr != nil {
+		return nil, f.getPolicyErr
+	}
+	p := f.policyStore()[aws.ToString(in.PolicyArn)]
+	if p == nil {
+		return nil, noSuchEntity
+	}
+	return &iam.GetPolicyOutput{Policy: &iamtypes.Policy{Arn: aws.String(p.arn), PolicyName: aws.String(p.name), AttachmentCount: aws.Int32(p.attachments)}}, nil
+}
+
+func (f *fakeAwsPolicyAPI) CreatePolicy(_ context.Context, in *iam.CreatePolicyInput, _ ...func(*iam.Options)) (*iam.CreatePolicyOutput, error) {
+	f.calls = append(f.calls, "createPolicy:"+aws.ToString(in.PolicyName))
+	if f.createPolicyErr != nil {
+		return nil, f.createPolicyErr
+	}
+	arn := "arn:aws:iam::111111111111:policy/" + aws.ToString(in.PolicyName)
+	p := f.addPolicy(aws.ToString(in.PolicyName), arn, aws.ToString(in.PolicyDocument), 1)
+	return &iam.CreatePolicyOutput{Policy: &iamtypes.Policy{Arn: aws.String(p.arn), PolicyName: aws.String(p.name)}}, nil
+}
+
+func (f *fakeAwsPolicyAPI) CreatePolicyVersion(_ context.Context, in *iam.CreatePolicyVersionInput, _ ...func(*iam.Options)) (*iam.CreatePolicyVersionOutput, error) {
+	f.calls = append(f.calls, "createPolicyVersion:"+aws.ToString(in.PolicyArn))
+	if f.createVersionErr != nil {
+		return nil, f.createVersionErr
+	}
+	p := f.policyStore()[aws.ToString(in.PolicyArn)]
+	if p == nil {
+		return nil, noSuchEntity
+	}
+	if len(p.versions) >= 5 {
+		return nil, &iamtypes.LimitExceededException{Message: aws.String("version limit")}
+	}
+	p.addVersion(aws.ToString(in.PolicyDocument), in.SetAsDefault)
+	return &iam.CreatePolicyVersionOutput{}, nil
+}
+
+func (f *fakeAwsPolicyAPI) ListPolicyVersions(_ context.Context, in *iam.ListPolicyVersionsInput, _ ...func(*iam.Options)) (*iam.ListPolicyVersionsOutput, error) {
+	f.calls = append(f.calls, "listPolicyVersions:"+aws.ToString(in.PolicyArn))
+	p := f.policyStore()[aws.ToString(in.PolicyArn)]
+	if p == nil {
+		return nil, noSuchEntity
+	}
+	// AWS 는 최신 순으로 돌려준다
+	out := make([]iamtypes.PolicyVersion, len(p.versions))
+	for i := range p.versions {
+		out[len(p.versions)-1-i] = p.versions[i]
+	}
+	return &iam.ListPolicyVersionsOutput{Versions: out}, nil
+}
+
+func (f *fakeAwsPolicyAPI) DeletePolicyVersion(_ context.Context, in *iam.DeletePolicyVersionInput, _ ...func(*iam.Options)) (*iam.DeletePolicyVersionOutput, error) {
+	f.calls = append(f.calls, "deletePolicyVersion:"+aws.ToString(in.VersionId))
+	p := f.policyStore()[aws.ToString(in.PolicyArn)]
+	if p == nil {
+		return nil, noSuchEntity
+	}
+	for i, v := range p.versions {
+		if aws.ToString(v.VersionId) == aws.ToString(in.VersionId) {
+			if v.IsDefaultVersion {
+				return nil, &iamtypes.DeleteConflictException{Message: aws.String("default version")}
+			}
+			p.versions = append(p.versions[:i], p.versions[i+1:]...)
+			return &iam.DeletePolicyVersionOutput{}, nil
+		}
+	}
+	return nil, noSuchEntity
+}
+
+func (f *fakeAwsPolicyAPI) DeletePolicy(_ context.Context, in *iam.DeletePolicyInput, _ ...func(*iam.Options)) (*iam.DeletePolicyOutput, error) {
+	f.calls = append(f.calls, "deletePolicy:"+aws.ToString(in.PolicyArn))
+	if f.deletePolicyErr != nil {
+		return nil, f.deletePolicyErr
+	}
+	p := f.policyStore()[aws.ToString(in.PolicyArn)]
+	if p == nil {
+		return nil, noSuchEntity
+	}
+	if len(p.versions) > 1 {
+		return nil, &iamtypes.DeleteConflictException{Message: aws.String("delete non-default versions first")}
+	}
+	delete(f.policies, p.arn)
+	return &iam.DeletePolicyOutput{}, nil
 }
 
 type bindingFixture struct {
@@ -335,8 +472,14 @@ func TestPolicyBinding_RejectedRequestsWriteNothing(t *testing.T) {
 			doc := map[string]interface{}{"Statement": map[string]interface{}{"Effect": "Allow", "NotAction": "s3:*", "Resource": "*"}}
 			return f.role.ID, f.policy(t, "mciam-t045-notaction", model.PolicyTypeInline, "", doc).ID
 		}, http.StatusForbidden, "forbidden_policy"},
-		{"custom 타입", func(t *testing.T, f *bindingFixture) (uint, uint) {
-			return f.role.ID, f.policy(t, "c", model.PolicyTypeCustom, testManagedArn, nil).ID
+		{"custom ARN 없음(AWS 실체 없는 이전 정의)", func(t *testing.T, f *bindingFixture) (uint, uint) {
+			return f.role.ID, f.policy(t, "c", model.PolicyTypeCustom, "", nil).ID
+		}, http.StatusBadRequest, "invalid_request"},
+		{"inline 이 이미 다른 Role 에 연결됨", func(t *testing.T, f *bindingFixture) (uint, uint) {
+			p := f.policy(t, "mciam-t045-shared", model.PolicyTypeInline, "", adminDoc("s3:GetObject"))
+			other := seedBindingRole(t, f.db, "mciam-t045-other", &f.cfg.ID)
+			require.NoError(t, f.db.Create(&model.CspRolePolicyMapping{CspRoleID: other.ID, CspPolicyID: p.ID, AwsStatus: model.PolicyAwsStatusApplied}).Error)
+			return f.role.ID, p.ID
 		}, http.StatusBadRequest, "invalid_request"},
 		{"managed ARN 없음", func(t *testing.T, f *bindingFixture) (uint, uint) {
 			return f.role.ID, f.policy(t, "m", model.PolicyTypeManaged, "", nil).ID
@@ -367,7 +510,7 @@ func TestPolicyBinding_RejectedRequestsWriteNothing(t *testing.T) {
 			_, err := f.svc.AttachPolicyToRole(roleID, policyID)
 			requireBindingError(t, err, tc.status, tc.code)
 			assert.Empty(t, f.api.calls)
-			assert.Zero(t, f.mappingCount(t))
+			assert.Nil(t, f.mapping(t, roleID, policyID), "대상 Role 매핑 없음")
 		})
 	}
 }

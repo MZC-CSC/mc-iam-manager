@@ -1685,7 +1685,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Create a new CSP policy",
+                "description": "Create a CSP policy definition.\n- inline: policy_doc required; stored in IAM and written into one CSP role on attach.\n- managed: an AWS managed policy ARN (arn:aws:iam::aws:policy/...) only; attach and detach only.\n- custom (customer managed): with policy_arn, registers an existing policy; without policy_arn, IAM creates it in AWS (CreatePolicy) as mciam-\u003cname\u003e from policy_doc.\nDocuments with an Allow statement using Action \"*\", \"iam:*\" or NotAction are rejected (403 forbidden_policy). 409 when the name exists in IAM or (custom) in AWS. 502 when AWS fails (nothing is saved).",
                 "consumes": [
                     "application/json"
                 ],
@@ -1724,8 +1724,35 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1976,7 +2003,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Update CSP policy details",
+                "description": "Update a CSP policy definition and apply document changes in AWS.\n- custom (mciam-* only, else 403): new default version (CreatePolicyVersion; the oldest non-default version is removed at the 5-version limit). AWS first; on failure 502 and nothing is saved.\n- inline: the document is saved, then written to the attached CSP role (PutRolePolicy). If that fails the response is 200 with warnings and the mapping is marked failed; attach again to retry. 409 when attached to more than one role.\n- managed: documents cannot be changed (400).\nWhile attached in AWS, renaming an inline policy or changing policy_arn returns 409. Connections whose attach failed (aws_status=failed) do not block it; attach again after the change. Forbidden documents return 403.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2010,11 +2037,20 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.CspPolicy"
+                            "$ref": "#/definitions/model.CspPolicyChangeResult"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2031,8 +2067,26 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2048,7 +2102,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Delete a CSP policy by ID",
+                "description": "Delete a CSP policy definition. 409 while attached to CSP roles.\nFor a custom policy named mciam-*, the AWS policy is deleted too (non-default versions first); 409 when it is attached to AWS entities outside IAM, 502 when AWS fails. Other policies are only unregistered.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2091,8 +2145,26 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2286,7 +2358,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Synchronize policies from the CSP cloud",
+                "description": "Import policies from the CSP. AWS managed policies are stored as managed; customer managed policies are imported only when named mciam-* (as custom). Existing rows are matched by ARN within the account",
                 "consumes": [
                     "application/json"
                 ],
@@ -14342,6 +14414,59 @@ const docTemplate = `{
                 }
             }
         },
+        "model.CspPolicyChangeResult": {
+            "type": "object",
+            "properties": {
+                "bindingResults": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.PolicyBindingResult"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "csp_account": {
+                    "$ref": "#/definitions/model.CspAccount"
+                },
+                "csp_account_id": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "policy_arn": {
+                    "type": "string"
+                },
+                "policy_doc": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "policy_type": {
+                    "description": "inline, managed, custom",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.PolicyType"
+                        }
+                    ]
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "model.CspPolicyFilter": {
             "type": "object",
             "properties": {
@@ -15163,9 +15288,9 @@ const docTemplate = `{
                 "custom"
             ],
             "x-enum-comments": {
-                "PolicyTypeCustom": "사용자 정의 정책",
-                "PolicyTypeInline": "인라인 정책 (역할에 직접 포함)",
-                "PolicyTypeManaged": "관리형 정책 (독립 정책)"
+                "PolicyTypeCustom": "고객 관리형 정책(계정의 독립 정책): 여러 Role 공유, IAM 이 생성·수정·삭제 (mciam-* 만)",
+                "PolicyTypeInline": "인라인 정책: 문서를 Role 1개 안에 사본으로 저장 (Role 1개 전용)",
+                "PolicyTypeManaged": "AWS 관리형 정책(arn:aws:iam::aws:policy/...): 연결·해제만, 문서 수정 불가"
             },
             "x-enum-varnames": [
                 "PolicyTypeInline",

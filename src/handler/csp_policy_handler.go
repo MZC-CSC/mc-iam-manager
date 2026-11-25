@@ -27,40 +27,47 @@ func NewCspPolicyHandler(db *gorm.DB) *CspPolicyHandler {
 
 // CreateCspPolicy godoc
 // @Summary Create CSP policy
-// @Description Create a new CSP policy
+// @Description Create a CSP policy definition.
+// @Description - inline: policy_doc required; stored in IAM and written into one CSP role on attach.
+// @Description - managed: an AWS managed policy ARN (arn:aws:iam::aws:policy/...) only; attach and detach only.
+// @Description - custom (customer managed): with policy_arn, registers an existing policy; without policy_arn, IAM creates it in AWS (CreatePolicy) as mciam-<name> from policy_doc.
+// @Description Documents with an Allow statement using Action "*", "iam:*" or NotAction are rejected (403 forbidden_policy). 409 when the name exists in IAM or (custom) in AWS. 502 when AWS fails (nothing is saved).
 // @Tags csp-policies
 // @Accept json
 // @Produce json
 // @Param policy body model.CreateCspPolicyRequest true "CSP Policy Info"
 // @Success 201 {object} model.CspPolicy
 // @Failure 400 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Failure 409 {object} map[string]string
 // @Failure 500 {object} map[string]string
+// @Failure 502 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/csp-policies [post]
 // @Id createCspPolicy
 func (h *CspPolicyHandler) CreateCspPolicy(c echo.Context) error {
 	var req model.CreateCspPolicyRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format", "errorCode": "invalid_request"})
 	}
 
 	// 필수 필드 검증
 	if req.Name == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Name is required"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Name is required", "errorCode": "invalid_request"})
 	}
 	if req.CspAccountID == 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "CSP Account ID is required"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "CSP Account ID is required", "errorCode": "invalid_request"})
 	}
 	if req.PolicyType == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Policy type is required"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Policy type is required", "errorCode": "invalid_request"})
 	}
 	if req.PolicyType != model.PolicyTypeInline && req.PolicyType != model.PolicyTypeManaged && req.PolicyType != model.PolicyTypeCustom {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid policy type. Must be one of: inline, managed, custom"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid policy type. Must be one of: inline, managed, custom", "errorCode": "invalid_request"})
 	}
 
 	policy, err := h.cspPolicyService.CreateCspPolicy(&req)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create policy: %v", err)})
+		return policyErrorJSON(c, err, "Failed to create policy")
 	}
 
 	return c.JSON(http.StatusCreated, policy)
@@ -81,12 +88,12 @@ func (h *CspPolicyHandler) CreateCspPolicy(c echo.Context) error {
 func (h *CspPolicyHandler) ListCspPolicies(c echo.Context) error {
 	var filter model.CspPolicyFilter
 	if err := c.Bind(&filter); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format", "errorCode": "invalid_request"})
 	}
 
 	policies, err := h.cspPolicyService.ListCspPolicies(&filter)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to list policies: %v", err)})
+		return policyErrorJSON(c, err, "Failed to list policies")
 	}
 
 	if policies == nil {
@@ -113,15 +120,12 @@ func (h *CspPolicyHandler) ListCspPolicies(c echo.Context) error {
 func (h *CspPolicyHandler) GetCspPolicyByID(c echo.Context) error {
 	policyID, err := util.StringToUint(c.Param("policyId"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid policy ID"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid policy ID", "errorCode": "invalid_request"})
 	}
 
 	policy, err := h.cspPolicyService.GetCspPolicyByID(policyID)
 	if err != nil {
-		if err.Error() == fmt.Sprintf("policy not found with ID: %d", policyID) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to get policy: %v", err)})
+		return policyErrorJSON(c, err, "Failed to get policy")
 	}
 
 	return c.JSON(http.StatusOK, policy)
@@ -129,36 +133,40 @@ func (h *CspPolicyHandler) GetCspPolicyByID(c echo.Context) error {
 
 // UpdateCspPolicy godoc
 // @Summary Update CSP policy
-// @Description Update CSP policy details
+// @Description Update a CSP policy definition and apply document changes in AWS.
+// @Description - custom (mciam-* only, else 403): new default version (CreatePolicyVersion; the oldest non-default version is removed at the 5-version limit). AWS first; on failure 502 and nothing is saved.
+// @Description - inline: the document is saved, then written to the attached CSP role (PutRolePolicy). If that fails the response is 200 with warnings and the mapping is marked failed; attach again to retry. 409 when attached to more than one role.
+// @Description - managed: documents cannot be changed (400).
+// @Description While attached in AWS, renaming an inline policy or changing policy_arn returns 409. Connections whose attach failed (aws_status=failed) do not block it; attach again after the change. Forbidden documents return 403.
 // @Tags csp-policies
 // @Accept json
 // @Produce json
 // @Param policyId path string true "Policy ID"
 // @Param policy body model.UpdateCspPolicyRequest true "CSP Policy Info"
-// @Success 200 {object} model.CspPolicy
+// @Success 200 {object} model.CspPolicyChangeResult
 // @Failure 400 {object} map[string]string
+// @Failure 403 {object} map[string]string
 // @Failure 404 {object} map[string]string
+// @Failure 409 {object} map[string]string
 // @Failure 500 {object} map[string]string
+// @Failure 502 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/csp-policies/id/{policyId} [put]
 // @Id updateCspPolicy
 func (h *CspPolicyHandler) UpdateCspPolicy(c echo.Context) error {
 	policyID, err := util.StringToUint(c.Param("policyId"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid policy ID"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid policy ID", "errorCode": "invalid_request"})
 	}
 
 	var req model.UpdateCspPolicyRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format", "errorCode": "invalid_request"})
 	}
 
 	policy, err := h.cspPolicyService.UpdateCspPolicy(policyID, &req)
 	if err != nil {
-		if err.Error() == fmt.Sprintf("policy not found with ID: %d", policyID) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to update policy: %v", err)})
+		return policyErrorJSON(c, err, "Failed to update policy")
 	}
 
 	return c.JSON(http.StatusOK, policy)
@@ -166,7 +174,8 @@ func (h *CspPolicyHandler) UpdateCspPolicy(c echo.Context) error {
 
 // DeleteCspPolicy godoc
 // @Summary Delete CSP policy
-// @Description Delete a CSP policy by ID
+// @Description Delete a CSP policy definition. 409 while attached to CSP roles.
+// @Description For a custom policy named mciam-*, the AWS policy is deleted too (non-default versions first); 409 when it is attached to AWS entities outside IAM, 502 when AWS fails. Other policies are only unregistered.
 // @Tags csp-policies
 // @Accept json
 // @Produce json
@@ -174,21 +183,20 @@ func (h *CspPolicyHandler) UpdateCspPolicy(c echo.Context) error {
 // @Success 204 "No Content"
 // @Failure 400 {object} map[string]string
 // @Failure 404 {object} map[string]string
+// @Failure 409 {object} map[string]string
 // @Failure 500 {object} map[string]string
+// @Failure 502 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/csp-policies/id/{policyId} [delete]
 // @Id deleteCspPolicy
 func (h *CspPolicyHandler) DeleteCspPolicy(c echo.Context) error {
 	policyID, err := util.StringToUint(c.Param("policyId"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid policy ID"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid policy ID", "errorCode": "invalid_request"})
 	}
 
 	if err := h.cspPolicyService.DeleteCspPolicy(policyID); err != nil {
-		if err.Error() == fmt.Sprintf("policy not found with ID: %d", policyID) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to delete policy: %v", err)})
+		return policyErrorJSON(c, err, "Failed to delete policy")
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -196,7 +204,7 @@ func (h *CspPolicyHandler) DeleteCspPolicy(c echo.Context) error {
 
 // SyncCspPolicies godoc
 // @Summary Sync CSP policies from cloud
-// @Description Synchronize policies from the CSP cloud
+// @Description Import policies from the CSP. AWS managed policies are stored as managed; customer managed policies are imported only when named mciam-* (as custom). Existing rows are matched by ARN within the account
 // @Tags csp-policies
 // @Accept json
 // @Produce json
@@ -210,16 +218,16 @@ func (h *CspPolicyHandler) DeleteCspPolicy(c echo.Context) error {
 func (h *CspPolicyHandler) SyncCspPolicies(c echo.Context) error {
 	var req model.SyncPoliciesRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format", "errorCode": "invalid_request"})
 	}
 
 	if req.CspAccountID == 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "CSP Account ID is required"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "CSP Account ID is required", "errorCode": "invalid_request"})
 	}
 
 	policies, err := h.cspPolicyService.SyncPoliciesFromCloud(c.Request().Context(), &req)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to sync policies: %v", err)})
+		return policyErrorJSON(c, err, "Failed to sync policies")
 	}
 
 	return c.JSON(http.StatusOK, policies)
@@ -315,12 +323,12 @@ func (h *CspPolicyHandler) bindPolicy(c echo.Context, attach bool) error {
 func (h *CspPolicyHandler) GetRolePolicies(c echo.Context) error {
 	roleID, err := util.StringToUint(c.Param("roleId"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid role ID"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid role ID", "errorCode": "invalid_request"})
 	}
 
 	policies, err := h.cspPolicyService.GetRolePoliciesWithStatus(roleID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to get policies: %v", err)})
+		return policyErrorJSON(c, err, "Failed to get policies")
 	}
 
 	return c.JSON(http.StatusOK, policies)
@@ -343,16 +351,21 @@ func (h *CspPolicyHandler) GetRolePolicies(c echo.Context) error {
 func (h *CspPolicyHandler) GetPolicyDocument(c echo.Context) error {
 	policyID, err := util.StringToUint(c.Param("policyId"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid policy ID"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid policy ID", "errorCode": "invalid_request"})
 	}
 
 	document, err := h.cspPolicyService.GetPolicyDocument(c.Request().Context(), policyID)
 	if err != nil {
-		if err.Error() == fmt.Sprintf("policy not found with ID: %d", policyID) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to get policy document: %v", err)})
+		return policyErrorJSON(c, err, "Failed to get policy document")
 	}
 
 	return c.JSON(http.StatusOK, document)
+}
+
+// policyErrorJSON 서비스 오류를 상태 코드와 errorCode 로 돌려준다
+func policyErrorJSON(c echo.Context, err error, prefix string) error {
+	if be, ok := service.AsPolicyBindingError(err); ok {
+		return c.JSON(be.Status, map[string]string{"error": be.Msg, "errorCode": be.Code})
+	}
+	return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("%s: %v", prefix, err), "errorCode": "db_error"})
 }

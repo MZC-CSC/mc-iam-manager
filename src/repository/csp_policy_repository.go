@@ -50,6 +50,42 @@ func (r *CspPolicyRepository) GetByName(name string) (*model.CspPolicy, error) {
 	return &policy, nil
 }
 
+// GetByArnAndAccountID 계정의 ARN 으로 CSP 정책 조회 (없으면 nil). 여러 계정을 sync 할 때 AWS 관리형 ARN 이 같아도 계정별로 따로 둔다.
+func (r *CspPolicyRepository) GetByArnAndAccountID(arn string, accountID uint) (*model.CspPolicy, error) {
+	var policies []*model.CspPolicy
+	if err := r.db.Where("policy_arn = ? AND csp_account_id = ?", arn, accountID).Limit(1).Find(&policies).Error; err != nil {
+		return nil, fmt.Errorf("failed to get CSP policy by ARN: %w", err)
+	}
+	if len(policies) == 0 {
+		return nil, nil
+	}
+	return policies[0], nil
+}
+
+// UpdatePolicyFields 지정한 컬럼만 갱신한다 (연관 CspAccount·created_at 은 쓰지 않는다).
+func (r *CspPolicyRepository) UpdatePolicyFields(id uint, values map[string]interface{}) error {
+	if len(values) == 0 {
+		return nil
+	}
+	result := r.db.Model(&model.CspPolicy{}).Where("id = ?", id).Updates(values)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update CSP policy: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("CSP policy not found")
+	}
+	return nil
+}
+
+// ListMappingsByPolicyID 정책의 Role 매핑 행 목록
+func (r *CspPolicyRepository) ListMappingsByPolicyID(policyID uint) ([]*model.CspRolePolicyMapping, error) {
+	var mappings []*model.CspRolePolicyMapping
+	if err := r.db.Where("csp_policy_id = ?", policyID).Find(&mappings).Error; err != nil {
+		return nil, fmt.Errorf("failed to list policy mappings: %w", err)
+	}
+	return mappings, nil
+}
+
 // GetByArn ARN으로 CSP 정책 조회
 func (r *CspPolicyRepository) GetByArn(arn string) (*model.CspPolicy, error) {
 	var policy model.CspPolicy
