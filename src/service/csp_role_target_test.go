@@ -19,14 +19,25 @@ import (
 
 // fakeAwsRoleAPI 대상 CSP Role 확정 테스트용 AWS IAM
 type fakeAwsRoleAPI struct {
-	providers   map[string][]string // OIDC provider ARN → ClientIDList
-	providerErr error               // GetOpenIDConnectProvider 오류 (AccessDenied 등)
-	roles       map[string]*iamtypes.Role
-	getErr      error // NoSuchEntity 외의 GetRole 오류
-	createErr   error
-	getCalls    int
-	createCalls []*iam.CreateRoleInput
-	deleteCalls []string
+	providers     map[string][]string // OIDC provider ARN → ClientIDList
+	providerErr   error               // GetOpenIDConnectProvider 오류 (AccessDenied 등)
+	roles         map[string]*iamtypes.Role
+	getErr        error // NoSuchEntity 외의 GetRole 오류
+	createErr     error
+	getCalls      int
+	createCalls   []*iam.CreateRoleInput
+	deleteCalls   []string
+	samlProviders map[string]bool // 있는 SAML provider ARN
+}
+
+func (f *fakeAwsRoleAPI) GetSAMLProvider(_ context.Context, in *iam.GetSAMLProviderInput, _ ...func(*iam.Options)) (*iam.GetSAMLProviderOutput, error) {
+	if f.providerErr != nil {
+		return nil, f.providerErr
+	}
+	if !f.samlProviders[aws.ToString(in.SAMLProviderArn)] {
+		return nil, &iamtypes.NoSuchEntityException{Message: aws.String("no saml provider")}
+	}
+	return &iam.GetSAMLProviderOutput{}, nil
 }
 
 func newFakeAwsRoleAPI() *fakeAwsRoleAPI {

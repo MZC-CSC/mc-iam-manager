@@ -59,6 +59,7 @@ type awsRoleAPI interface {
 	GetRole(ctx context.Context, params *iam.GetRoleInput, optFns ...func(*iam.Options)) (*iam.GetRoleOutput, error)
 	CreateRole(ctx context.Context, params *iam.CreateRoleInput, optFns ...func(*iam.Options)) (*iam.CreateRoleOutput, error)
 	GetOpenIDConnectProvider(ctx context.Context, params *iam.GetOpenIDConnectProviderInput, optFns ...func(*iam.Options)) (*iam.GetOpenIDConnectProviderOutput, error)
+	GetSAMLProvider(ctx context.Context, params *iam.GetSAMLProviderInput, optFns ...func(*iam.Options)) (*iam.GetSAMLProviderOutput, error)
 	DeleteRole(ctx context.Context, params *iam.DeleteRoleInput, optFns ...func(*iam.Options)) (*iam.DeleteRoleOutput, error)
 }
 
@@ -191,23 +192,17 @@ func isAwsNoSuchEntity(err error) bool {
 	return errors.As(err, &nse)
 }
 
-// awsRoleClientFor 소속 Config 기준 관리용 AWS IAM 클라이언트. 테스트는 awsRoleClient 를 바꿔 끼운다.
+// awsRoleClientFor 소속 Config 기준 관리용 AWS IAM 클라이언트 (IAM-TECH-045 M2: system 자격증명 대신 Config 의 관리용 Role, Config 별 캐시).
+// 소속 Config 가 SAML 이거나 관리용 Role 을 assume 할 수 없으면 같은 계정의 활성 aws OIDC Config 를 쓴다. 테스트는 awsRoleClient 를 바꿔 끼운다.
 func (s *CspRoleService) awsRoleClientFor(cfg *model.CspIdpConfig) (awsRoleAPI, error) {
 	if s.awsRoleClient != nil {
 		return s.awsRoleClient(cfg)
 	}
-	issuedBy := "system"
-	credential, err := s.tempCredentialRepo.GetOrCreateValidCredential("aws", "oidc", "ap-northeast-2", nil, issuedBy, func() (*model.TempCredential, error) {
-		return s.createNewAwsCredential(issuedBy)
-	})
+	mgmt, err := managementConfigFor(s.cspIdpConfigRepo, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get or create valid credential: %v", err)
+		return nil, err
 	}
-	awsCfg, err := s.createAwsConfigWithTempCredential(credential)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create AWS config with temp credential: %v", err)
-	}
-	return iam.NewFromConfig(awsCfg), nil
+	return managementIamClient(context.TODO(), NewCspIdpConfigService(s.db, s.keycloakService), mgmt)
 }
 
 // ensureAwsRole AWS 에 Role 이 있으면 등록, NoSuchEntity 일 때만 소속 Config 기반 신뢰 정책으로 생성한다.
@@ -382,6 +377,8 @@ type CspRoleCheckResult struct {
 	CspRoleID   uint   `json:"cspRoleId,omitempty"`
 	Arn         string `json:"arn,omitempty"`
 	Message     string `json:"message,omitempty"`
+	// TrustPolicy AWS 신뢰 정책 판정 (exists_in_db·exists_in_csp 인 aws Role, IAM-TECH-045 M2). 판정이 실패해도 status 는 바꾸지 않는다
+	TrustPolicy *model.TrustPolicyCheck `json:"trustPolicy,omitempty"`
 }
 
 // CheckTargetCspRole 대상 CSP Role 이 어디에 있는지만 확인한다. DB·AWS 어디에도 쓰지 않는다.
@@ -423,6 +420,9 @@ func (s *CspRoleService) CheckTargetCspRole(req model.CreateCspRoleRequest) CspR
 	}
 	if existing != nil && existing.Status != "failed" {
 		out.Status, out.CspRoleID, out.Arn = TargetCheckExistsInDB, existing.ID, existing.IamIdentifier
+		if existing.CspType == "aws" {
+			out.TrustPolicy = s.VerifyTargetTrustPolicy(context.TODO(), existing)
+		}
 		return out
 	}
 	if req.CspType != "aws" {
@@ -439,6 +439,9 @@ func (s *CspRoleService) CheckTargetCspRole(req model.CreateCspRoleRequest) CspR
 	switch {
 	case err == nil:
 		out.Status, out.Arn = TargetCheckExistsInCsp, aws.ToString(got.Role.Arn)
+		// 아직 등록 전: 요청의 인증 방식과 소속 Config 로 기대값을 만든다
+		exp := newTrustExpectation(string(requestAuthMethod(&req)), idpConfig)
+		out.TrustPolicy = evaluateTrustPolicy(name, aws.ToString(got.Role.AssumeRolePolicyDocument), []trustExpectation{exp})
 	case isAwsNoSuchEntity(err):
 		out.Status = TargetCheckNotFound
 		if _, _, terr := buildAwsTrustPolicy(&req, idpConfig); terr != nil {

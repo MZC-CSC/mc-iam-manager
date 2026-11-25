@@ -47,6 +47,8 @@ type CspCredentialService struct {
 	tencentCredService  TencentCredentialService
 	ibmCredService      IbmCredentialService
 	keycloakService     KeycloakService
+	// trustVerifier SAML provider 사전 확인 (관리용 자격증명, IAM-TECH-045 M2). nil 이면 CspRoleService
+	trustVerifier valTrustVerifier
 }
 
 // NewCspCredentialService 새 CspCredentialService 인스턴스 생성
@@ -221,8 +223,12 @@ func (s *CspCredentialService) GetTemporaryCredentials(ctx context.Context, user
 			log.Printf("[CSP_CREDENTIAL] Check 2 PASS: Keycloak SAML client '%s' 확인", samlClientAudience)
 
 			// Check 3: CSP — AWS SAML Provider 존재 확인 (IAM 읽기 권한 있을 때만 검증, 없으면 경고 후 진행)
-			if _, err := s.awsCredService.CheckSAMLProvider(ctx, idpArn); err != nil {
-				log.Printf("[CSP_CREDENTIAL] Check 3 WARN: AWS SAML Provider 확인 불가 (IAM 읽기 권한 미보유) — idpArn=%s, err=%v. "+
+			verifier := s.trustVerifier
+			if verifier == nil {
+				verifier = NewCspRoleService(s.db, s.keycloakService)
+			}
+			if _, err := verifier.VerifyTargetProvider(ctx, targetCspRole, string(model.AuthMethodSAML)); err != nil {
+				log.Printf("[CSP_CREDENTIAL] Check 3 WARN: AWS SAML Provider 확인 실패(관리용 자격증명) — idpArn=%s, err=%v. "+
 					"미등록 시 조치: AWS IAM → Identity providers에서 SAML Provider 등록 및 Keycloak metadata XML 업로드", idpArn, err)
 			} else {
 				log.Printf("[CSP_CREDENTIAL] Check 3 PASS: AWS SAML Provider '%s' 확인", idpArn)

@@ -721,6 +721,11 @@ definitions:
         type: string
       error:
         type: string
+      trust_policy:
+        allOf:
+        - $ref: '#/definitions/model.TrustPolicyCheck'
+        description: TrustPolicy AWS OIDC·SAML Role 의 신뢰 정책 판정 (IAM-TECH-045 M2, 진단
+          API 와 같은 판정)
       valid:
         type: boolean
     type: object
@@ -1824,6 +1829,57 @@ definitions:
       value:
         type: string
     type: object
+  model.TrustPolicyCheck:
+    properties:
+      extra:
+        description: IAM 이 쓰지 않은 statement 의 principal 요약
+        items:
+          type: string
+        type: array
+      message:
+        type: string
+      roleName:
+        type: string
+      statements:
+        items:
+          $ref: '#/definitions/model.TrustStatementCheck'
+        type: array
+      status:
+        description: ok | missing | mismatch | not_found | error
+        type: string
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
+  model.TrustStatementCheck:
+    properties:
+      actualActions:
+        items:
+          type: string
+        type: array
+      actualAud:
+        items:
+          type: string
+        type: array
+      authMethod:
+        type: string
+      expectedAction:
+        type: string
+      expectedAud:
+        type: string
+      expectedAudKey:
+        type: string
+      expectedFederated:
+        type: string
+      idpConfigId:
+        type: integer
+      message:
+        type: string
+      status:
+        description: ok | missing | mismatch | error
+        type: string
+    type: object
   model.UpdateCspAccountRequest:
     properties:
       account_info:
@@ -2726,9 +2782,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Validate CSP account by checking actual CSP infrastructure (IDP
-        provider existence, role trust policy, or credential validity) for each linked
-        CspRole
+      description: |-
+        Validate CSP account by checking actual CSP infrastructure (IDP provider existence, role trust policy, or credential validity) for each linked CspRole
+        AWS OIDC·SAML roles are checked with the management role of the IdP config (no server AWS credentials needed): provider existence (OIDC audience included) and the trust policy (Federated, Action, aud). Each result carries trust_policy with the same verdict as the credential validation API.
       operationId: validateCspAccount
       parameters:
       - description: Account ID
@@ -6943,7 +6999,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: 대상 CSP Role 이 IAM(DB)·CSP 에 있는지만 확인한다. DB·CSP 에 쓰지 않는다.
+      description: |-
+        대상 CSP Role 이 IAM(DB)·CSP 에 있는지만 확인한다. DB·CSP 에 쓰지 않는다.
+        exists_in_db·exists_in_csp 인 aws Role 에는 trustPolicy(신뢰 정책 판정)를 붙인다: 소속 IdP Config 로 만든 기대값(Federated·Action·aud, OIDC·SAML)과 AWS 실제 신뢰 정책 비교.
+        trustPolicy.status: ok | missing | mismatch | not_found | error, statements[] 인증 방식별 판정, extra[] IAM 이 쓰지 않은 statement(정보성). 판정이 나빠도 항목 status 는 바뀌지 않는다.
       operationId: checkCspRoles
       parameters:
       - description: cspRoles (cspRoleName, cspType, authMethod, cspIdpConfigId)

@@ -24,15 +24,6 @@ func (m *mockAwsCredService) AssumeRoleWithWebIdentity(_ context.Context, roleAr
 func (m *mockAwsCredService) AssumeRoleWithSAML(_ context.Context, roleArn, principalArn, samlAssertion, region string) (*model.CspCredentialResponse, error) {
 	return m.samlResult, m.samlErr
 }
-func (m *mockAwsCredService) CheckOIDCProvider(_ context.Context, oidcProviderArn string) (string, error) {
-	return "", nil
-}
-func (m *mockAwsCredService) CheckSAMLProvider(_ context.Context, samlProviderArn string) (string, error) {
-	return "", nil
-}
-func (m *mockAwsCredService) CheckRoleTrust(_ context.Context, roleArn, expectedAction, expectedProviderArn string) (string, error) {
-	return "", nil
-}
 func (m *mockAwsCredService) CheckCallerIdentity(_ context.Context, accessKeyID, secretKey string) (string, error) {
 	return "", nil
 }
@@ -64,8 +55,8 @@ func (m *mockGcpCredService) GenerateAccessToken(_ context.Context, serviceAccou
 // ── Alibaba ──────────────────────────────────────────────────────────────────
 
 type mockAlibabaCredService struct {
-	result    *model.CspCredentialResponse
-	err       error
+	result     *model.CspCredentialResponse
+	err        error
 	oidcResult *model.CspCredentialResponse
 	oidcErr    error
 }
@@ -227,9 +218,13 @@ type credServiceDeps struct {
 	kc       KeycloakService // 인터페이스 — mockKeycloakService 또는 mockKeycloakForCred 모두 허용
 	userRepo *mockUserRepoForCred
 	mapRepo  *mockCspMappingRepo
+	verifier *mockValAwsService // SAML provider 사전 확인(관리용 자격증명). nil 이면 아래 기본 mock
 }
 
 func newCredServiceWithMocks(deps credServiceDeps) *CspCredentialService {
+	if deps.verifier == nil {
+		deps.verifier = &mockValAwsService{}
+	}
 	return &CspCredentialService{
 		awsCredService:     deps.aws,
 		gcpCredService:     deps.gcp,
@@ -240,6 +235,7 @@ func newCredServiceWithMocks(deps credServiceDeps) *CspCredentialService {
 		keycloakService:    deps.kc,
 		userRepoIface:      deps.userRepo,
 		mappingRepoIface:   deps.mapRepo,
+		trustVerifier:      deps.verifier,
 	}
 }
 
@@ -269,11 +265,11 @@ var errStsFail = errors.New("STS call failed")
 // ── 제어 가능한 Keycloak mock (credential 테스트 전용) ─────────────────────────
 
 type mockKeycloakForCred struct {
-	mockKeycloakService                    // 나머지 메서드는 기존 stub 재사용
-	oidcToken   *gocloak.JWT
-	oidcErr     error
-	samlAssertion string
-	samlErr     error
+	mockKeycloakService // 나머지 메서드는 기존 stub 재사용
+	oidcToken           *gocloak.JWT
+	oidcErr             error
+	samlAssertion       string
+	samlErr             error
 }
 
 func (m *mockKeycloakForCred) GetImpersonationTokenByServiceAccount(ctx context.Context) (*gocloak.JWT, error) {

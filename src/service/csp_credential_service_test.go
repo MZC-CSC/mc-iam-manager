@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Nerzal/gocloak/v13"
@@ -696,4 +697,23 @@ func TestGetTemporaryCredentials_UnsupportedCspType(t *testing.T) {
 	_, err := svc.GetTemporaryCredentials(context.Background(), 1, "kc_user_id", req("unknown_csp", "OIDC"))
 	require.Error(t, err)
 	assert.Equal(t, ErrUnsupportedCspType, err)
+}
+
+// SAML 발급 사전 확인 Check 3 은 관리용 자격증명으로 provider 를 확인하고, 실패해도 경고만 하고 발급한다 (IAM-TECH-045 M2)
+func TestGetTemporaryCredentials_AWS_SAML_ProviderCheckWarnsOnly(t *testing.T) {
+	aws := &mockAwsCredService{samlResult: awsSamlCred}
+	mapping := buildMapping(constants.AuthMethodSAML, idpArn, roleArn, model.AuthMethodSAML, nil)
+	mapping.CspRoles[0].ExtendedConfig = map[string]interface{}{"saml_client_id": idpArn}
+	svc := newCredServiceWithMocks(credServiceDeps{
+		aws:      aws,
+		gcp:      &mockGcpCredService{},
+		alibaba:  &mockAlibabaCredService{},
+		kc:       samlKC(),
+		userRepo: &mockUserRepoForCred{role: stdUserRole()},
+		mapRepo:  &mockCspMappingRepo{mapping: mapping},
+		verifier: &mockValAwsService{samlProviderErr: errors.New("saml provider does not exist")},
+	})
+	cred, err := svc.GetTemporaryCredentials(context.Background(), 1, "kc_user_id", req("aws", "SAML"))
+	require.NoError(t, err, "provider 확인 실패는 경고만")
+	assert.Equal(t, "ASIA_SAML", cred.AccessKeyId)
 }

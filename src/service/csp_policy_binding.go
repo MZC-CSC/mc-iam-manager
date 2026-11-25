@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/m-cmp/mc-iam-manager/constants"
 	"github.com/m-cmp/mc-iam-manager/model"
@@ -441,18 +439,8 @@ func (s *CspPolicyService) awsPolicyClientFor(ctx context.Context, cfg *model.Cs
 	if s.awsPolicyClient != nil {
 		return s.awsPolicyClient(cfg)
 	}
-	tempCred, err := s.cspIdpConfigService.AssumeRoleWithIdpConfig(ctx, cfg.ID, cfg.Config["role_arn"], policyBindingSessionName, 900)
-	if err != nil {
-		return nil, fmt.Errorf("failed to assume management role of IdP config %d: %w", cfg.ID, err)
-	}
-	awsCfg, err := config.LoadDefaultConfig(ctx,
-		config.WithRegion(tempCred.Region),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(tempCred.AccessKeyId, tempCred.SecretAccessKey, tempCred.SessionToken)),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
-	}
-	return iam.NewFromConfig(awsCfg), nil
+	// Config 별 캐시를 공유한다 (IAM-TECH-045 M2)
+	return managementIamClient(ctx, s.cspIdpConfigService, cfg)
 }
 
 // GetRolePoliciesWithStatus 역할에 연결된 정책과 매핑의 AWS 반영 상태

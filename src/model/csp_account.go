@@ -133,6 +133,8 @@ type CspAccountValidationResult struct {
 	Valid       bool   `json:"valid"`
 	Detail      string `json:"detail,omitempty"`
 	Error       string `json:"error,omitempty"`
+	// TrustPolicy AWS OIDC·SAML Role 의 신뢰 정책 판정 (IAM-TECH-045 M2, 진단 API 와 같은 판정)
+	TrustPolicy *TrustPolicyCheck `json:"trust_policy,omitempty"`
 }
 
 // CspAccountValidationResponse CSP 계정 인프라 검증 응답
