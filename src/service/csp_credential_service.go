@@ -222,13 +222,21 @@ func (s *CspCredentialService) GetTemporaryCredentials(ctx context.Context, user
 			}
 			log.Printf("[CSP_CREDENTIAL] Check 2 PASS: Keycloak SAML client '%s' 확인", samlClientAudience)
 
-			// Check 3: CSP — AWS SAML Provider 존재 확인 (IAM 읽기 권한 있을 때만 검증, 없으면 경고 후 진행)
+			// Check 3: CSP — AWS SAML Provider 존재 확인 (관리용 자격증명)
+			//   - 발급에 쓸 provider 가 AWS 에 없으면(NoSuchEntity) 중단: AssumeRoleWithSAML 이 항상 실패한다
+			//   - 권한 부족·일시 오류 등 확인 자체가 안 되면 경고만 남기고 발급을 계속한다
 			verifier := s.trustVerifier
 			if verifier == nil {
 				verifier = NewCspRoleService(s.db, s.keycloakService)
 			}
 			if _, err := verifier.VerifyTargetProvider(ctx, targetCspRole, string(model.AuthMethodSAML)); err != nil {
-				log.Printf("[CSP_CREDENTIAL] Check 3 WARN: AWS SAML Provider 확인 실패(관리용 자격증명) — idpArn=%s, err=%v. "+
+				var pnf *ProviderNotFoundError
+				if errors.As(err, &pnf) && pnf.ProviderArn == idpArn {
+					return nil, fmt.Errorf("[설정 오류: CSP] %w. 조치: IdP Config(id=%s) 의 saml_provider_arn 과 CSP Role(id=%d) 의 IDP Identifier 가 "+
+						"AWS IAM → Identity providers 의 SAML Provider ARN 과 같은지 확인하고, 없으면 SAML Provider 를 등록(Keycloak metadata XML 업로드)",
+						err, idpConfigIDString(targetCspRole), targetCspRole.ID)
+				}
+				log.Printf("[CSP_CREDENTIAL] Check 3 WARN: AWS SAML Provider 확인 실패(관리용 자격증명) — idpArn=%s, err=%v. 발급은 계속한다. "+
 					"미등록 시 조치: AWS IAM → Identity providers에서 SAML Provider 등록 및 Keycloak metadata XML 업로드", idpArn, err)
 			} else {
 				log.Printf("[CSP_CREDENTIAL] Check 3 PASS: AWS SAML Provider '%s' 확인", idpArn)
@@ -534,4 +542,12 @@ func (s *CspCredentialService) GetUserPlatformRoleNames(userID uint) ([]string, 
 		roleNames[i] = role.Role.Name
 	}
 	return roleNames, nil
+}
+
+// idpConfigIDString 오류 안내용 IdP Config ID (미연결이면 "-")
+func idpConfigIDString(role *model.CspRole) string {
+	if role == nil || role.CspIdpConfigID == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%d", *role.CspIdpConfigID)
 }

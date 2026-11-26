@@ -245,6 +245,7 @@ func (h *CspAccountHandler) ValidateCspAccount(c echo.Context) error {
 // @Description ① Keycloak OIDC 클라이언트 ② CSP 계정 ③ IdP Config ④ Provider 신뢰(연결 테스트) ⑤ CSP Role ⑥ 역할 매핑 ⑦ 실제 assume.
 // @Description 대상 CSP Role 은 같은 CSP 타입이면서 csp_account_id 가 이 계정이거나 미기록인 역할입니다.
 // @Description ④·⑦ 은 CSP 를 실제로 호출하므로 PlatformAdmin 일 때만 수행하고, ⑦ 은 checkIssue=true 일 때만 수행합니다. 자격증명은 반환하지 않습니다.
+// @Description ⑦ 을 수행할 때 AWS OIDC·SAML Role 마다 신뢰 정책 판정(cspRoles[].trustPolicy: ok·missing·mismatch·not_found·error)을 참고 정보로 붙입니다. 관리용 자격증명으로 읽기만 하며, ⑦ 판정은 실제 assume 결과로만 정합니다. missing·mismatch 이면 POST /api/csp-target-roles/id/{id}/trust-policy/sync 를 안내합니다.
 // @Tags csp-accounts
 // @Produce json
 // @Param accountId path string true "Account ID"

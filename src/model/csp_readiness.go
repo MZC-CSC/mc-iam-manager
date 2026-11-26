@@ -52,6 +52,15 @@ type CspRoleReadiness struct {
 	MappingStatus  ReadinessStatus `json:"mappingStatus"` // ⑥
 	IssueStatus    ReadinessStatus `json:"issueStatus"`   // ⑦
 	IssueDetail    string          `json:"issueDetail,omitempty"`
+	// TrustPolicy ⑦ 참고 정보: AWS 신뢰 정책 판정 (checkIssue·PlatformAdmin 일 때 AWS Role 만). ⑦ 판정은 실제 assume 결과로만 정한다
+	TrustPolicy *CspRoleTrustReadiness `json:"trustPolicy,omitempty"`
+}
+
+// CspRoleTrustReadiness CSP Role 신뢰 정책 판정 요약 (IAM-TECH-045 M2, 읽기만)
+type CspRoleTrustReadiness struct {
+	Status     string `json:"status"` // ok | missing | mismatch | not_found | error
+	Detail     string `json:"detail,omitempty"`
+	NextAction string `json:"nextAction,omitempty"`
 }
 
 // CspAccountReadinessResponse CSP 계정별 임시자격증명 연동 준비 상태

@@ -331,9 +331,9 @@ serviceActions:
             description: ""
     mc-iam-manager:
         _meta:
-            version: 0.7.3
+            version: 0.7.4
             repository: https://github.com/m-cmp/mc-iam-manager
-            generatedAt: "2026-11-20T05:07:29Z"
+            generatedAt: "2026-11-25T07:39:57Z"
         CreateFrameworkService:
             method: post
             resourcePath: /api/mcmp-apis
@@ -446,6 +446,10 @@ serviceActions:
             method: put
             resourcePath: /api/users/me/password
             description: Change the authenticated user's own password. Requires current password for verification.
+        checkCspIdpConfigTrustPolicy:
+            method: post
+            resourcePath: /api/csp-idp-configs/id/{configId}/trust-policy/check
+            description: Check every CSP target role of the IdP config against the statement of this IdP config's auth method. Nothing is written. Management roles (protected) and non-aws roles (invalid_request) are reported and skipped.
         checkCspRoles:
             method: post
             resourcePath: /api/roles/csp/check
@@ -1178,6 +1182,14 @@ serviceActions:
             method: post
             resourcePath: /api/csp-policies/sync
             description: Synchronize policies from the CSP cloud
+        syncCspIdpConfigTrustPolicy:
+            method: post
+            resourcePath: /api/csp-idp-configs/id/{configId}/trust-policy/sync
+            description: Sync every CSP target role of the IdP config with the statement of this IdP config's auth method (same rules as the single-role sync). dryRun is true by default.
+        syncCspTargetRoleTrustPolicy:
+            method: post
+            resourcePath: /api/csp-target-roles/id/{roleId}/trust-policy/sync
+            description: Compare the AWS trust policy of the target role with the expected statements built from its IdP config and fix only what differs. dryRun is true by default.
         syncMcmpAPIs:
             method: post
             resourcePath: /api/setup/sync-mcmp-apis

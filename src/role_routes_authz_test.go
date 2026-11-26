@@ -113,3 +113,22 @@ func TestRolesWriteRoutesHaveAuthz(t *testing.T) {
 		t.Errorf("write route %q has no authorization middleware", route)
 	}
 }
+
+// 신뢰 정책 재동기화·일괄 확인 라우트 권한 (IAM-TECH-045 M2 PR-2): sync 는 PlatformAdmin(/roles/csp 쓰기와 같음), Config check 는 /roles/csp/check 와 같은 Write
+func TestTrustPolicyRoutesAuthz(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	want := map[string]string{
+		`cspTargetRoles.POST("/id/:roleId/trust-policy/sync"`:   authzPlatformAdmin,
+		`cspIdpConfigs.POST("/id/:configId/trust-policy/sync"`:  authzPlatformAdmin,
+		`cspIdpConfigs.POST("/id/:configId/trust-policy/check"`: authzWrite,
+	}
+	for prefix, mw := range want {
+		re := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(prefix) + `,\s*\w+\.\w+,\s*` + regexp.QuoteMeta(mw) + `\)`)
+		if !re.Match(src) {
+			t.Errorf("route %s must be registered with %s", prefix, mw)
+		}
+	}
+}

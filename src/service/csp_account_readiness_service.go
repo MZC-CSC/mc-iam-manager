@@ -42,6 +42,11 @@ type readinessAwsAssumer interface {
 	AssumeRoleWithWebIdentity(ctx context.Context, roleArn, kcUserId, webIdentityToken, idpArn, region string) (*model.CspCredentialResponse, error)
 }
 
+// readinessTrustVerifier ⑦ 참고용 신뢰 정책 판정 (읽기만, 관리용 자격증명)
+type readinessTrustVerifier interface {
+	VerifyTargetTrustPolicy(ctx context.Context, role *model.CspRole, methods ...string) *model.TrustPolicyCheck
+}
+
 // ErrCspAccountNotFound readiness 대상 계정 없음
 var ErrCspAccountNotFound = fmt.Errorf("CSP account not found")
 
@@ -60,6 +65,7 @@ type CspAccountReadinessService struct {
 	tokens        readinessTokenSource
 	connTester    readinessConnectionTester
 	awsAssumer    readinessAwsAssumer
+	trust         readinessTrustVerifier // nil 이면 신뢰 정책 판정 생략
 	now           func() time.Time
 }
 
@@ -74,6 +80,7 @@ func NewCspAccountReadinessService(db *gorm.DB) *CspAccountReadinessService {
 		tokens:        keycloakService,
 		connTester:    NewCspIdpConfigService(db, keycloakService),
 		awsAssumer:    NewAwsCredentialService(),
+		trust:         NewCspRoleService(db, keycloakService),
 		now:           time.Now,
 	}
 }
@@ -250,7 +257,7 @@ func (s *CspAccountReadinessService) GetReadiness(ctx context.Context, accountID
 	idents := make(map[uint]roleIdentifiers, len(roles))
 	readyCount, mappedReadyCount := 0, 0
 	for _, role := range roles {
-		idents[role.ID] = roleIdentifiers{iam: role.IamIdentifier, idp: role.IdpIdentifier}
+		idents[role.ID] = roleIdentifiers{iam: role.IamIdentifier, idp: role.IdpIdentifier, role: role}
 		rr := evaluateCspRole(role, account)
 		rr.MappingCount = counts[role.ID]
 		switch {
@@ -467,8 +474,15 @@ func (s *CspAccountReadinessService) checkIssue(ctx context.Context, account *mo
 	tokenFetched := false
 	attempted, succeeded, issuable := 0, 0, 0
 
+	trustProblems := 0
 	for _, i := range candidates {
 		rr := &resp.CspRoles[i]
+		if tr := s.trustReadiness(ctx, account, rr, idents[rr.CspRoleID].role); tr != nil {
+			rr.TrustPolicy = tr
+			if tr.Status == model.TrustPolicyMissing || tr.Status == model.TrustPolicyMismatch {
+				trustProblems++
+			}
+		}
 		if account.CspType != "aws" || rr.AuthMethod != string(model.AuthMethodOIDC) {
 			rr.IssueStatus = model.ReadinessNotApplicable
 			rr.IssueDetail = fmt.Sprintf("%s %s 는 실제 발급 검사 미지원 — 워크스페이스 기준 진단(POST /api/workspaces/credentials/validate) 사용", account.CspType, rr.AuthMethod)
@@ -526,8 +540,53 @@ func (s *CspAccountReadinessService) checkIssue(ctx context.Context, account *mo
 		stage.Detail = fmt.Sprintf("assume 성공 0 / %d건 (cspRoles[].issueDetail 참고)", attempted)
 		stage.NextAction = "사용자용 Role 신뢰 정책의 Federated(OIDC Provider ARN)·aud 확인 (가이드 B4)"
 	}
+	if trustProblems > 0 && stage.Status != model.ReadinessOK {
+		stage.NextAction = fmt.Sprintf("신뢰 정책이 기대값과 다른 CSP Role %d건 — cspRoles[].trustPolicy.nextAction 대로 재동기화 (POST /api/csp-target-roles/id/{id}/trust-policy/sync)", trustProblems)
+	}
 	return stage
 }
 
+// trustReadiness ⑦ 참고용 신뢰 정책 판정. AWS OIDC·SAML Role 만, 조회 실패는 status=error 로만 표시한다
+func (s *CspAccountReadinessService) trustReadiness(ctx context.Context, account *model.CspAccount, rr *model.CspRoleReadiness, role *model.CspRole) *model.CspRoleTrustReadiness {
+	if s.trust == nil || role == nil || account.CspType != "aws" {
+		return nil
+	}
+	if rr.AuthMethod != string(model.AuthMethodOIDC) && rr.AuthMethod != string(model.AuthMethodSAML) {
+		return nil
+	}
+	tctx, cancel := context.WithTimeout(ctx, readinessLiveCallTimeout)
+	check := s.trust.VerifyTargetTrustPolicy(tctx, role, rr.AuthMethod)
+	cancel()
+	if check == nil {
+		return &model.CspRoleTrustReadiness{Status: model.TrustPolicyError, Detail: "신뢰 정책 판정 결과 없음"}
+	}
+	out := &model.CspRoleTrustReadiness{Status: check.Status}
+	var msgs []string
+	for _, st := range check.Statements {
+		if st.Status != model.TrustPolicyOK && st.Message != "" {
+			msgs = append(msgs, fmt.Sprintf("%s: %s", st.AuthMethod, st.Message))
+		}
+	}
+	if len(msgs) == 0 && check.Message != "" {
+		msgs = append(msgs, check.Message)
+	}
+	switch check.Status {
+	case model.TrustPolicyOK:
+		out.Detail = fmt.Sprintf("%s 신뢰 정책이 기대값과 일치", rr.AuthMethod)
+	case model.TrustPolicyMissing, model.TrustPolicyMismatch:
+		out.Detail = strings.Join(msgs, "; ")
+		out.NextAction = fmt.Sprintf("POST /api/csp-target-roles/id/%d/trust-policy/sync 로 변경안 확인(dryRun 기본) 후 dryRun=false 로 반영. IAM 밖에서 만든 Role 을 등록한 경우 allowRegistered=true", rr.CspRoleID)
+	case model.TrustPolicyNotFound:
+		out.Detail = strings.Join(msgs, "; ")
+		out.NextAction = "CSP Role 의 IAM Identifier 확인, AWS 에 Role 이 없으면 다시 생성 (POST /api/roles/csp)"
+	default:
+		out.Detail = strings.Join(msgs, "; ")
+	}
+	return out
+}
+
 // roleIdentifiers ⑦ assume 에 쓰는 역할 식별자
-type roleIdentifiers struct{ iam, idp string }
+type roleIdentifiers struct {
+	iam, idp string
+	role     *model.CspRole
+}

@@ -36,10 +36,12 @@ func NewCspCredentialHandler(db *gorm.DB) *CspCredentialHandler {
 // GetTemporaryCredentials godoc
 // @Summary Get temporary credentials
 // @Description Get temporary credentials for CSP
+// @Description AWS SAML: before issuing, the SAML provider is read with the management credential. 400 invalid_request when the provider does not exist in AWS; other check failures (e.g. AccessDenied) only log a warning.
 // @Tags csp-credentials
 // @Accept json
 // @Produce json
 // @Security BearerAuth
+// @Failure 400 {object} map[string]string "error, errorCode"
 // @Router /api/workspaces/temporary-credentials [post]
 // @Id mciamGetTemporaryCredentials
 func (h *CspCredentialHandler) GetTemporaryCredentials(c echo.Context) error {
@@ -97,6 +99,10 @@ func (h *CspCredentialHandler) GetTemporaryCredentials(c echo.Context) error {
 		}
 		if errors.Is(err, service.ErrUnsupportedCspType) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		// 발급 사전 확인에서 provider 가 AWS 에 없다고 확인됨 — 설정 오류 (IAM-TECH-045 M2)
+		if errors.Is(err, service.ErrCspProviderNotFound) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "errorCode": "invalid_request"})
 		}
 		// Handle STS specific errors (e.g., access denied by AWS)
 		if strings.Contains(err.Error(), "failed to assume AWS role") {

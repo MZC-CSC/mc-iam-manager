@@ -171,6 +171,10 @@ func TestVerifyTargetProvider(t *testing.T) {
 	require.NoError(t, svc.db.Create(saml).Error)
 	_, err = svc.VerifyTargetProvider(context.TODO(), role, "SAML")
 	assert.ErrorContains(t, err, "does not exist")
+	var pnf *ProviderNotFoundError
+	require.ErrorAs(t, err, &pnf, "provider 없음은 발급 사전 확인이 구분할 수 있는 타입")
+	assert.Equal(t, testSamlProviderArn, pnf.ProviderArn)
+	assert.ErrorIs(t, err, ErrCspProviderNotFound)
 	api.samlProviders = map[string]bool{testSamlProviderArn: true}
 	_, err = svc.VerifyTargetProvider(context.TODO(), role, "SAML")
 	assert.NoError(t, err)
@@ -178,6 +182,7 @@ func TestVerifyTargetProvider(t *testing.T) {
 	api.providerErr = &smithy.GenericAPIError{Code: "AccessDenied", Message: "denied"}
 	_, err = svc.VerifyTargetProvider(context.TODO(), role, "SAML")
 	assert.ErrorContains(t, err, "not allowed")
+	assert.NotErrorIs(t, err, ErrCspProviderNotFound, "권한 부족은 provider 없음이 아니다")
 }
 
 // check: DB 에 있는 Role 과 AWS 에만 있는 Role 모두 신뢰 정책 판정을 붙인다

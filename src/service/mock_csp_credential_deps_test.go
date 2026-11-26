@@ -16,12 +16,14 @@ type mockAwsCredService struct {
 	oidcErr    error
 	samlResult *model.CspCredentialResponse
 	samlErr    error
+	samlCalls  int
 }
 
 func (m *mockAwsCredService) AssumeRoleWithWebIdentity(_ context.Context, roleArn, kcUserId, token, idpArn, region string) (*model.CspCredentialResponse, error) {
 	return m.oidcResult, m.oidcErr
 }
 func (m *mockAwsCredService) AssumeRoleWithSAML(_ context.Context, roleArn, principalArn, samlAssertion, region string) (*model.CspCredentialResponse, error) {
+	m.samlCalls++
 	return m.samlResult, m.samlErr
 }
 func (m *mockAwsCredService) CheckCallerIdentity(_ context.Context, accessKeyID, secretKey string) (string, error) {
