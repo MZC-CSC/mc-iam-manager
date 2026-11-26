@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/m-cmp/mc-iam-manager/model"
@@ -206,10 +205,7 @@ func (s *CspCredentialService) GetTemporaryCredentials(ctx context.Context, user
 			if extConfig, ok := targetCspRole.ExtendedConfig["saml_client_id"].(string); ok && extConfig != "" {
 				samlClientAudience = extConfig
 			} else {
-				defaultClientID := os.Getenv("SAML_CLIENT_ID_AWS")
-				return nil, fmt.Errorf("[설정 누락: DB] CspRole(id=%d)에 saml_client_id 미등록. "+
-					"조치: UPDATE mcmp_role_csp_roles SET extended_config='{\"saml_client_id\":\"%s\"}' WHERE id=%d",
-					targetCspRole.ID, defaultClientID, targetCspRole.ID)
+				return nil, samlClientIDMissingError(targetCspRole.ID, "aws")
 			}
 			log.Printf("[CSP_CREDENTIAL] Check 1 PASS: saml_client_id=%s (CspRole %d)", samlClientAudience, targetCspRole.ID)
 
@@ -311,10 +307,7 @@ func (s *CspCredentialService) GetTemporaryCredentials(ctx context.Context, user
 			if extConfig, ok := targetCspRole.ExtendedConfig["saml_client_id"].(string); ok && extConfig != "" {
 				samlClientAudience = extConfig
 			} else {
-				defaultClientID := os.Getenv("SAML_CLIENT_ID_ALIBABA")
-				return nil, fmt.Errorf("[설정 누락: DB] CspRole(id=%d)에 saml_client_id 미등록. "+
-					"조치: UPDATE mcmp_role_csp_roles SET extended_config='{\"saml_client_id\":\"%s\"}' WHERE id=%d",
-					targetCspRole.ID, defaultClientID, targetCspRole.ID)
+				return nil, samlClientIDMissingError(targetCspRole.ID, "alibaba")
 			}
 			log.Printf("[CSP_CREDENTIAL] Check 1 PASS: saml_client_id=%s (CspRole %d)", samlClientAudience, targetCspRole.ID)
 
@@ -551,3 +544,18 @@ func idpConfigIDString(role *model.CspRole) string {
 	}
 	return fmt.Sprintf("%d", *role.CspIdpConfigID)
 }
+
+// samlClientIDMissingError CspRole 에 extendedConfig.saml_client_id 가 없을 때의 설정 누락 오류.
+// SAML 클라이언트 ID 는 CspRole 에서만 읽는다(env 대체 없음). 예시 값은 AWS 만 고정값이 있다.
+func samlClientIDMissingError(cspRoleID uint, cspType string) error {
+	example := "<Keycloak SAML 클라이언트 ID>"
+	if cspType == "aws" {
+		example = awsSamlClientIDExample
+	}
+	return fmt.Errorf("[설정 누락: DB] CspRole(id=%d)에 saml_client_id 미등록. "+
+		"조치: PUT /api/roles/csp/id/%d {\"extendedConfig\":{\"saml_client_id\":\"%s\"}}",
+		cspRoleID, cspRoleID, example)
+}
+
+// awsSamlClientIDExample AWS SAML 의 Keycloak SAML 클라이언트 ID (assertion Audience). 안내 문구에만 쓴다
+const awsSamlClientIDExample = "urn:amazon:webservices"
