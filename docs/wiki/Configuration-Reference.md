@@ -51,12 +51,12 @@ Found by searching `os.Getenv` under [`src/`](https://github.com/m-cmp/mc-iam-ma
 | Variable | Default | Required | Purpose | Read in |
 |---|---|---|---|---|
 | `MC_IAM_MANAGER_KEYCLOAK_HOST` | none | Start | Internal Keycloak base URL including `/auth`, e.g. `http://mc-iam-manager-kc:8080/auth` | [`src/config/keycloak.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/config/keycloak.go) |
-| `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL` | value of `MC_IAM_MANAGER_KEYCLOAK_HOST` | Optional | Public Keycloak URL. Its host part is used for the AWS OIDC provider ARN in CSP role trust policies. | same, [`src/service/csp_role_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_role_service.go) |
+| `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL` | value of `MC_IAM_MANAGER_KEYCLOAK_HOST` | Optional | Public Keycloak URL. Read at start-up but not used for CSP trust policies (they are built from the IdP config). The installer uses it to build the IdP config values. | same |
 | `MC_IAM_MANAGER_KEYCLOAK_REALM` | none | Start | Application realm (`mciam`) | [`src/config/keycloak.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/config/keycloak.go), [`src/service/company_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/company_service.go) |
 | `MC_IAM_MANAGER_KEYCLOAK_CLIENT_NAME` | none | Start | Main confidential client ID (`mciamClient`) | same |
 | `MC_IAM_MANAGER_KEYCLOAK_CLIENT_SECRET` | none | Start | Secret of the main client | same |
-| `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_NAME` | none | Start | OIDC client used for CSP federation (`mciam-oidc-Client`) | [`src/config/keycloak.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/config/keycloak.go) |
-| `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_ID` | none | Start | OIDC client ID. Must be non-empty at start-up (`.env.setup` ships `notyet`). Also used as the audience in AWS trust policies. | same, [`src/service/csp_role_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_role_service.go) |
+| `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_NAME` | none | Start | OIDC client used for CSP federation (`mciam-oidc-Client`). `POST /api/initial-admin` creates it with `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_SECRET` if it does not exist | [`src/config/keycloak.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/config/keycloak.go) |
+| `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_ID` | none | Start | OIDC client ID. Must be non-empty at start-up (`.env.setup` ships `notyet`). Not used in AWS trust policies (the audience comes from the IdP config `audience`). | same |
 | `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_SECRET` | none | Start | Secret of the OIDC client | [`src/config/keycloak.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/config/keycloak.go) |
 | `MC_IAM_MANAGER_KEYCLOAK_ADMIN` | none | Feature (setup, admin operations) | Keycloak `master` realm admin user. Also passed to Keycloak as `KEYCLOAK_ADMIN`. | same |
 | `MC_IAM_MANAGER_KEYCLOAK_ADMIN_PASSWORD` | none | Feature | Password of the above (Keycloak `KEYCLOAK_ADMIN_PASSWORD`) | same |
@@ -81,14 +81,14 @@ Found by searching `os.Getenv` under [`src/`](https://github.com/m-cmp/mc-iam-ma
 
 ### CSP integration
 
+> At runtime the AWS integration values (management role `role_arn`, `oidc_provider_arn`, `audience`, `saml_provider_arn`) are read only from the **IdP config in the database**. `MC_IAM_MANAGER_AWS_ACCOUNT_ID` and `MC_IAM_MANAGER_AWS_IDENTITY_ROLE_ARN` are no longer read by the server; see [Present in `.env.setup` but unused](#present-in-envsetup-but-unused).
+
 | Variable | Default | Required | Purpose | Read in |
 |---|---|---|---|---|
-| `MC_IAM_MANAGER_AWS_ACCOUNT_ID` | none | Feature (AWS role trust policy) | AWS account ID used in the OIDC provider ARN | [`src/service/csp_role_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_role_service.go) |
-| `MC_IAM_MANAGER_AWS_IDENTITY_ROLE_ARN` | none | Optional | Fallback role ARN when an AWS IdP config has none | [`src/service/csp_idp_config_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_idp_config_service.go) |
 | `AWS_REGION` | `ap-northeast-2` (where a default applies) | Optional | Region for AWS STS and credential checks | [`src/service/aws_credential_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/aws_credential_service.go), [`src/service/csp_validation_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_validation_service.go) |
-| `AWS_STS_ENDPOINT` | `https://sts.amazonaws.com` | Optional | STS endpoint for `AssumeRoleWithWebIdentity` | [`src/csp/aws/iam.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/csp/aws/iam.go) |
-| `SAML_CLIENT_ID_AWS` | none | Feature (AWS SAML) | Default Keycloak SAML client ID for AWS (`urn:amazon:webservices` in `.env_sample`) | [`src/service/csp_role_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_role_service.go), [`src/service/csp_credential_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_credential_service.go), [`src/service/csp_validation_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_validation_service.go) |
-| `SAML_CLIENT_ID_ALIBABA` | none | Feature (Alibaba SAML) | Default Keycloak SAML client ID for Alibaba Cloud | [`src/service/csp_role_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_role_service.go), [`src/service/csp_credential_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_credential_service.go) |
+| `AWS_STS_ENDPOINT` | `https://sts.amazonaws.com` | Optional | STS endpoint of the `/api/csp/iam` client | [`src/csp/aws/iam.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/csp/aws/iam.go) |
+| `SAML_CLIENT_ID_AWS` | none | Optional | Example value in the "saml_client_id missing" error, a warning-only Keycloak client check at SAML role creation, and a fallback in the validate API. Issuance uses the CSP role `extendedConfig.saml_client_id` (`urn:amazon:webservices`) | [`src/service/csp_role_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_role_service.go), [`src/service/csp_credential_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_credential_service.go), [`src/service/csp_validation_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_validation_service.go) |
+| `SAML_CLIENT_ID_ALIBABA` | none | Optional | Same as above for Alibaba Cloud | [`src/service/csp_role_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_role_service.go), [`src/service/csp_credential_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_credential_service.go) |
 
 ### Health check overrides
 
@@ -140,7 +140,7 @@ Nothing in `src/`, the compose files or the scripts reads these. They are kept f
 | `MC_IAM_MANAGER_HOST_FOR_INIT` | Referenced only in commented-out code in `1_setup_auto.sh` |
 | `MC_IAM_MANAGER_PUBLIC_KEYCLOAK_HOST`, `MC_IAM_MANAGER_KEYCLOAK_CLIENT_PATH` | Not read anywhere |
 | `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_DOMAIN`, `MC_IAM_MANAGER_CSP_ROLE_PREFIX` | Used only to build `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL` and the AWS ARNs inside `.env.setup` |
-| `MC_IAM_MANAGER_AWS_IDENTITY_PROVIDER_ARN` | Not read. The code builds the provider ARN from `MC_IAM_MANAGER_AWS_ACCOUNT_ID` and `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL`. |
+| `MC_IAM_MANAGER_AWS_ACCOUNT_ID`, `MC_IAM_MANAGER_AWS_IDENTITY_ROLE_ARN`, `MC_IAM_MANAGER_AWS_IDENTITY_PROVIDER_ARN` | Not read by the server. The provider ARN, audience and management role come from the IdP config; the mc-admin-cli bootstrap uses these values to create it. |
 | `TEMPORARY_SECURITY_CREDENTIALS_ENDPOINT_AWS` | Not read. The code uses `AWS_STS_ENDPOINT`. |
 | `MCINFRAMANAGER`, `MCINFRAMANAGER_APIUSERNAME`, `MCINFRAMANAGER_APIPASSWORD` | Not read. mc-infra-manager is reached through the service registry. |
 | `MC_INFRA_MANAGER_POSTGRES_PORT` | Not read (compose uses `MC_INFRA_MANAGER_POSTGRES_HOST_PORT`) |

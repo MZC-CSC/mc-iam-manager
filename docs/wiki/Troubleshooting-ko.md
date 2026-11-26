@@ -28,7 +28,7 @@ docker compose logs --tail=100 mc-iam-manager
 2. 스크립트 실행 시점에 mc-iam-manager가 아직 준비되지 않음(콜드 스타트 경쟁 조건). 컨테이너는 mc-iam-manager가 *시작*되기만 기다린 뒤 60초 대기합니다.
 3. mc-infra-manager가 정상이 아니어서 Step 6(`sync-projects`)이 실패함.
 
-**해결:** 원인을 해결하고 의존 서비스가 healthy가 될 때까지 기다린 뒤 post-init 컨테이너를 재실행합니다. 반복 실행해도 안전하지만, [Initial Setup의 Re-running](Initial-Setup#re-running)에 정리된 부수 효과가 있습니다.
+**해결:** 원인을 해결하고 의존 서비스가 healthy가 될 때까지 기다린 뒤 post-init 컨테이너를 재실행합니다. 단, Step 1이 이미 플랫폼 관리자를 만들었다면 재실행은 Step 1에서 HTTP 403으로 멈춥니다(다음 항목). 반복 실행해도 안전하지만, [Initial Setup의 Re-running](Initial-Setup#re-running)에 정리된 부수 효과가 있습니다.
 
 ```bash
 docker rm mc-iam-manager-post-initial 2>/dev/null
@@ -36,6 +36,14 @@ docker compose up -d mc-iam-manager-post-initial
 docker logs -f mc-iam-manager-post-initial
 curl -s http://localhost:5000/readyz        # expect {"status":"healthy"}
 ```
+
+### post-init Step 1이 HTTP 상태 `403`으로 실패
+
+**증상:** `Platform admin init HTTP Status: 403`, `platform admin is already initialized`.
+
+**원인:** 플랫폼 관리자가 이미 있으면 `POST /api/initial-admin`은 다시 실행되지 않습니다. 재실행 시 정상 동작입니다.
+
+**해결:** post-init 컨테이너 전체를 재실행하지 말고, 남은 단계의 API를 플랫폼 관리자 토큰으로 직접 호출합니다([Initial Setup, Re-running](Initial-Setup#re-running)).
 
 ### post-init Step 1이 HTTP 상태 `000`으로 실패
 
@@ -158,7 +166,7 @@ sudo chown -R "$USER:$USER" container-volume/mc-iam-manager/certs container-volu
 
 ### `.env`에서 비밀번호 변경 후 플랫폼 관리자 로그인 실패
 
-**원인:** `POST /api/initial-admin`은 사용자가 처음 생성될 때만 Keycloak 비밀번호를 설정합니다. 재실행 시에는 기존 비밀번호가 유지되므로, 새 `MC_IAM_MANAGER_PLATFORMADMIN_PASSWORD`로 로그인하는 Step 2가 실패합니다.
+**원인:** `POST /api/initial-admin`은 사용자가 처음 생성될 때만 Keycloak 비밀번호를 설정하고, 플랫폼 관리자가 생긴 뒤에는 403으로 거부합니다. `.env`의 `MC_IAM_MANAGER_PLATFORMADMIN_PASSWORD`를 바꿔도 기존 비밀번호는 바뀌지 않습니다.
 
 **해결:** Keycloak 관리 콘솔(`/auth/admin/`)에서 realm `MC_IAM_MANAGER_KEYCLOAK_REALM`의 해당 사용자 비밀번호를 새 값으로 설정하거나, `.env`를 이전 값으로 되돌립니다.
 

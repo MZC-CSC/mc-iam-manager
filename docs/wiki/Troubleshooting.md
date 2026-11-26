@@ -26,7 +26,7 @@ docker compose logs --tail=100 mc-iam-manager
 2. mc-iam-manager was not ready yet when the script ran (cold-start race). The container only waits for mc-iam-manager to be *started* and then sleeps 60 seconds.
 3. mc-infra-manager is not healthy, so Step 6 (`sync-projects`) fails.
 
-**Fix:** fix the cause, wait until the dependencies are healthy, then re-run the post-init container. It is safe to repeat, with the side effects listed in [Initial Setup, Re-running](Initial-Setup#re-running).
+**Fix:** fix the cause, wait until the dependencies are healthy, then re-run the post-init container. If Step 1 already created the platform admin, the re-run stops at Step 1 with HTTP 403 (next entries); see [Initial Setup, Re-running](Initial-Setup#re-running).
 
 ```bash
 docker rm mc-iam-manager-post-initial 2>/dev/null
@@ -34,6 +34,14 @@ docker compose up -d mc-iam-manager-post-initial
 docker logs -f mc-iam-manager-post-initial
 curl -s http://localhost:5000/readyz        # expect {"status":"healthy"}
 ```
+
+### Post-init Step 1 fails with HTTP status `403`
+
+**Symptom:** `Platform admin init HTTP Status: 403` and `platform admin is already initialized`.
+
+**Cause:** `POST /api/initial-admin` refuses to run again once a platform admin exists. This is expected on a re-run.
+
+**Fix:** do not re-run the whole post-init container. Call the remaining steps' APIs with a platform admin token ([Initial Setup, Re-running](Initial-Setup#re-running)).
 
 ### Post-init Step 1 fails with HTTP status `000`
 
@@ -156,7 +164,7 @@ The scripts suggest `../../bin/cleanAll.sh`, which exists only in mc-admin-cli. 
 
 ### Platform admin login fails after changing the password in `.env`
 
-**Cause:** `POST /api/initial-admin` sets the Keycloak password only when the user is first created. A re-run keeps the existing password, so Step 2 (login with the new `MC_IAM_MANAGER_PLATFORMADMIN_PASSWORD`) fails.
+**Cause:** `POST /api/initial-admin` sets the Keycloak password only when the user is first created, and returns 403 once the platform admin exists. Changing `MC_IAM_MANAGER_PLATFORMADMIN_PASSWORD` in `.env` does not change the existing password.
 
 **Fix:** set the new password for the user in realm `MC_IAM_MANAGER_KEYCLOAK_REALM` in the Keycloak admin console (`/auth/admin/`), or restore the old value in `.env`.
 

@@ -63,8 +63,9 @@ On success the script prints `=== Automated setup completed successfully ===` an
 
 Implemented in `SetupInitialAdmin` ([`src/handler/admin_handler.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/handler/admin_handler.go)) and `SetupInitialKeycloakAdmin` ([`src/service/keycloak_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/keycloak_service.go)). The route needs no authentication (`/initial-admin` is in the auth skip list in [`src/main.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/main.go)).
 
-1. Logs in to Keycloak as `MC_IAM_MANAGER_KEYCLOAK_ADMIN`.
+1. Logs in to Keycloak as `MC_IAM_MANAGER_KEYCLOAK_ADMIN`. If a platform admin user already exists, returns **403** `platform admin is already initialized` and changes nothing (500 if that check fails).
 2. Creates the realm `MC_IAM_MANAGER_KEYCLOAK_REALM` (access token lifetime `MC_IAM_MANAGER_ACCESS_TOKEN_LIFESPAN`) and the client `MC_IAM_MANAGER_KEYCLOAK_CLIENT_NAME`, if they do not exist.
+   It also ensures the CSP federation client `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_NAME`: if missing it is created with `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_SECRET` (confidential, service accounts and direct access grants on, standard flow off, audience mapper); if it exists only a missing audience mapper is added. A secret mismatch is only logged as a warning.
 3. Creates the Keycloak user `MC_IAM_MANAGER_PLATFORMADMIN_ID` with first name, last name and e-mail from `MC_IAM_MANAGER_PLATFORMADMIN_*`, if it does not exist, and sets `MC_IAM_MANAGER_PLATFORMADMIN_PASSWORD`. **An existing user's password is not changed.** All five `MC_IAM_MANAGER_PLATFORMADMIN_*` variables must be set.
 4. Syncs the user into the IAM DB, using the request body's `email`.
 5. Creates the `MC_IAM_MANAGER_PREDEFINED_PLATFORM_ROLE` roles in Keycloak and in the DB (as platform and workspace roles).
@@ -120,7 +121,7 @@ The prompt says `(0-8)` although options go up to 11. The manual script also has
 
 ## Re-running
 
-The setup is designed to be re-run, and the recovery message in `docker-post-init.sh` describes it as idempotent:
+The recovery message in `docker-post-init.sh` describes the setup as idempotent:
 
 ```bash
 export COMPOSE_FILE=docker-compose-standalone.yaml
@@ -133,7 +134,7 @@ What a re-run does to existing data:
 
 | Step | Effect on re-run |
 |---|---|
-| 1 | Realm, client and user are kept. The password is **not** reset. Roles and workspace are reused. |
+| 1 | `POST /api/initial-admin` returns **403** once the platform admin exists. `init_platform_admin` treats any status other than 200/201 as fatal, so **a re-run of `1_setup_auto.sh` stops at Step 1** after a first run created the admin. |
 | 2-1 | Organizations are upserted from the seed |
 | 3 | Existing roles are reused |
 | 4 | Skipped if menus already exist (`skipped: true`) |
@@ -144,7 +145,7 @@ What a re-run does to existing data:
 | 8 | **All projects are re-assigned to the first workspace.** A project belongs to one workspace at a time ([`src/repository/workspace_repository.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/repository/workspace_repository.go) `AddProjectAssociation` deletes other associations), so projects you moved to other workspaces are moved back. |
 | 8-1 | The workspace role is assigned again |
 
-To re-run only some steps on a system in use, call the corresponding API endpoints yourself with a platform admin token instead of re-running the whole container.
+Because of Step 1, re-running the whole container works only before the platform admin is created. After that, run the later steps yourself by calling the corresponding API endpoints with a platform admin token. (The mc-admin-cli bootstrap skips Step 1 on 403 and continues.)
 
 ## After setup
 

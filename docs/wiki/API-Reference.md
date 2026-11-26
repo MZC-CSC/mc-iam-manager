@@ -85,24 +85,25 @@ Authorization levels (from [`src/middleware/permission.go`](https://github.com/m
 | `/readyz` | 1 | Public | Health check (`?status=` for per-component checks) |
 | `/swagger/*` | 1 | Token required (see warning above) | Swagger UI |
 | `/api/auth` | 7 | Public, except `GET /temp-credential-csps` (token) | Login, logout, refresh, validate, JWKS certs, signup |
-| `/api/initial-admin` | 1 | Public | Creates the first platform admin |
+| `/api/initial-admin` | 1 | Public; 403 once a platform admin exists | Creates the first platform admin and the Keycloak OIDC client for CSP federation |
 | `/api/company` | 5 | Read for `GET`, PlatformAdmin for writes | Company profile (singleton) |
 | `/api/setup` | 12 | PlatformAdmin (group) | Seeding and sync: menus, role-menu permissions, MCMP APIs, projects, organizations, backup and restore |
 | `/api/workspaces` | 22 | Token; Write on most; PlatformAdmin on project assign/unassign | Workspace CRUD, members, workspace ticket, temporary CSP credentials, invitations |
 | `/api/projects` | 9 | Write / Manage; PlatformAdmin on assign/unassign | Project CRUD, workspace mapping |
-| `/api/roles` | 48 | Token; Write or Manage on mutations (some sub-role CRUD has no extra check) | Platform, workspace and CSP roles, assignments, mappings, role-to-MC-IAM-permission links |
+| `/api/roles` | 49 | Token; Write or Manage on mutations (some sub-role CRUD has no extra check) | Platform, workspace and CSP roles, assignments, mappings (incl. CSP role check), role-to-MC-IAM-permission links |
 | `/api/users` | 37 | Token; Read / Write; PlatformAdmin on (de)activate, withdraw, groups, effective roles | User CRUD, `me` endpoints, user menus and workspaces, organizations and groups |
 | `/api/invitations` | 3 | Write | Admin approval of workspace invitations |
 | `/api/menus` | 9 | Token; Write / PlatformAdmin on mutations | Menu CRUD, menu tree, menu-to-platform-role mapping |
 | `/api/resource-types/cloud-resources` | 5 | PlatformAdmin (group) | Cloud resource type registry |
 | `/api/permissions/mciam` | 5 | Read (group); Write on mutations | MC-IAM permission CRUD |
 | `/api/mcmp-apis` | 14 | Manage on most; `POST /call` checks inside the handler; Read / Manage on `/permission-action-mappings` (7 of the 14) | MCMP API registry, API gateway call, permission-action mappings |
-| `/api/csp-accounts` | 8 | Read (group); PlatformAdmin on mutations | CSP account management |
-| `/api/csp-idp-configs` | 10 | Read (group); PlatformAdmin on mutations | CSP identity provider (OIDC/SAML) configs |
+| `/api/csp-accounts` | 9 | Read (group); PlatformAdmin on mutations | CSP account management, validation, readiness |
+| `/api/csp-idp-configs` | 12 | Read (group); PlatformAdmin on mutations; Write on trust policy check | CSP identity provider (OIDC/SAML) configs, trust policy check and sync of their roles |
 | `/api/organizations` | 11 | Write (group) | Organization tree |
 | `/api/groups` | 19 | Write (group) | Alias of organizations, plus group users, platform roles and workspace mappings |
-| `/api/csp-policies` | 10 | Read (group); PlatformAdmin on mutations | CSP policy sync, attach and detach |
-| `/api/csp/iam` | 4 | PlatformAdmin (group) | Direct CSP IAM role CRUD |
+| `/api/csp-policies` | 10 | Read (group); PlatformAdmin on mutations | CSP policy definitions, sync, attach and detach (applied in AWS) |
+| `/api/csp-target-roles` | 1 | Read (group); PlatformAdmin | Trust policy sync of a target CSP role |
+| `/api/csp/iam` | 4 | PlatformAdmin (group) | AWS IAM role lookup (GET). POST, PUT and DELETE always return 400 |
 
 For the permission model behind these levels, see [Authentication and Authorization](Authentication-and-Authorization) and [MCMP API Permissions](MCMP-API-Permissions).
 
