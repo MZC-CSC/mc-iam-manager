@@ -838,19 +838,6 @@ func (r *RoleRepository) FindRoleSubByRoleIDAndType(roleID uint, roleType consta
 	return &roleSub, nil
 }
 
-// FindDefaultWorkspaceRole 기본 워크스페이스 역할 조회
-func (r *RoleRepository) FindDefaultWorkspaceRole() (*model.RoleMaster, error) {
-	var role model.RoleMaster
-	err := r.db.Where("name = ?", "workspace_user").
-		Joins("JOIN mcmp_role_subs ON mcmp_role_masters.id = mcmp_role_subs.role_id").
-		Where("mcmp_role_subs.role_type = ?", constants.RoleTypeWorkspace).
-		First(&role).Error
-	if err != nil {
-		return nil, err
-	}
-	return &role, nil
-}
-
 // CheckUserInWorkspace 사용자가 워크스페이스에 속해있는지 확인
 func (r *RoleRepository) CheckUserInWorkspace(workspaceID, userID uint) (bool, error) {
 	var count int64

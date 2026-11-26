@@ -92,8 +92,8 @@ func TestAddUserToWorkspace_UsesPathWorkspaceID(t *testing.T) {
 
 	// 이전에는 body 값만 써서 각각 400 이 났다. path 값으로 처리되면 워크스페이스 ID 검증 오류가 없어야 한다.
 	for name, body := range map[string]string{
-		"body 에 workspaceId 없음":   `{"userId":"1"}`,
-		"body workspaceId 가 잘못됨": `{"userId":"1","workspaceId":"not-a-number"}`,
+		"body 에 workspaceId 없음":   `{"userId":"1","roleId":"10"}`,
+		"body workspaceId 가 잘못됨": `{"userId":"1","roleId":"10","workspaceId":"not-a-number"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := echo.New()
