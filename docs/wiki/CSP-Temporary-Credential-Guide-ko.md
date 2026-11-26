@@ -569,6 +569,8 @@ Azure의 `sub` UUID는 1-1의 토큰 확인 스니펫에서 `jwt(kc.access_token
 
 ### 8-3. SAML을 쓸 때 추가로 필요한 것 (AWS 기준)
 
+> **상세 절차는 [AWS SAML 구성 절차](CSP-AWS-SAML-Guide-ko)를 보세요.** 아래는 요약입니다.
+
 Keycloak Admin Console과 AWS 콘솔에서 합니다.
 
 1. Keycloak 기동 옵션에 `KC_FEATURES: token-exchange,admin-fine-grained-authz`가 있어야 합니다(기본 compose에 포함).

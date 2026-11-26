@@ -22,6 +22,7 @@
 **Operations**
 - [Operations](Operations)
 - [CSP 임시자격증명 설정·발급 절차 (KO)](CSP-Temporary-Credential-Guide-ko)
+- [AWS SAML 구성 절차 (KO)](CSP-AWS-SAML-Guide-ko)
 - [Troubleshooting](Troubleshooting) ([KO](Troubleshooting-ko))
 
 **Development**

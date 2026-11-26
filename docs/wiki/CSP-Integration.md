@@ -137,6 +137,7 @@ Details:
 1. In the CSP IAM console, register Keycloak as an identity provider:
    - OIDC issuer `https://<MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL host>/realms/<MC_IAM_MANAGER_KEYCLOAK_REALM>`, audience `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_ID` (AWS, Alibaba, Tencent, GCP WIF pool, Azure federated credential, IBM trusted profile), or
    - SAML metadata from the Keycloak SAML client (AWS, Alibaba, Tencent, GCP).
+     For AWS SAML step by step (Keycloak SAML client, token exchange permission, AWS SAML provider, IdP config, CSP role, issuance, trust policy check and sync), see [AWS SAML 구성 절차 (KO)](CSP-AWS-SAML-Guide-ko).
 2. Create IAM roles named with the `mciam-` prefix (AWS can be created by mc-iam-manager), attach permissions, and set the trust relation to the provider.
 3. In mc-iam-manager: create the CSP account, the IdP config, the CSP role (with `idpIdentifier`, `iamIdentifier`, `cspIdpConfigId`, and `extendedConfig.saml_client_id` for SAML), then map workspace roles to it.
 
