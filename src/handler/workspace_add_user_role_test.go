@@ -53,8 +53,8 @@ func TestAddUserToWorkspace_RoleRules(t *testing.T) {
 		code           int
 		contains       string
 	}{
-		{"roleId 로 추가", "1", `{"userId":"3","roleId":"10"}`, http.StatusNoContent, ""},
-		{"roleName 으로 추가", "1", `{"userId":"3","roleName":"viewer"}`, http.StatusNoContent, ""},
+		{"roleId 로 추가", "1", `{"userId":"3","roleId":"10"}`, http.StatusOK, `"action":"created"`},
+		{"roleName 으로 추가", "1", `{"userId":"3","roleName":"viewer"}`, http.StatusOK, `"action":"created"`},
 		{"역할 없음", "1", `{"userId":"3"}`, http.StatusBadRequest, "roleId or roleName is required"},
 		{"잘못된 roleId", "1", `{"userId":"3","roleId":"abc"}`, http.StatusBadRequest, "Invalid role ID"},
 		{"없는 워크스페이스", "99", `{"userId":"3","roleId":"10"}`, http.StatusNotFound, "workspace not found"},
@@ -72,7 +72,7 @@ func TestAddUserToWorkspace_RoleRules(t *testing.T) {
 			if tc.contains != "" {
 				assert.Contains(t, rec.Body.String(), tc.contains)
 			}
-			if tc.code == http.StatusNoContent {
+			if tc.code == http.StatusOK {
 				var n int64
 				db.Model(&model.UserWorkspaceRole{}).Where("user_id = 3 AND workspace_id = 1 AND role_id = 10").Count(&n)
 				assert.Equal(t, int64(1), n, "지정한 역할로 한 행만 생긴다")

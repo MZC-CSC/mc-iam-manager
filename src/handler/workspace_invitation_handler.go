@@ -145,6 +145,7 @@ func (h *WorkspaceInvitationHandler) ListMyInvitations(c echo.Context) error {
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
 // @Failure 403 {object} map[string]string
+// @Failure 409 {object} map[string]interface{} "이미 그 워크스페이스에 역할이 있음 (errorCode already_assigned|role_conflict)"
 // @Security BearerAuth
 // @Router /api/users/me/invitations/{invitationId}/accept [put]
 // @Id acceptInvitation
@@ -162,6 +163,9 @@ func (h *WorkspaceInvitationHandler) AcceptInvitation(c echo.Context) error {
 	if err := h.invitationService.AcceptInvitation(uint(invitationID), callerID); err != nil {
 		if err.Error() == "forbidden: not your invitation" {
 			return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
+		if code, body, ok := invitationRoleConflictResponse(err); ok {
+			return c.JSON(code, body)
 		}
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -230,6 +234,7 @@ func (h *WorkspaceInvitationHandler) ListAllInvitations(c echo.Context) error {
 // @Param invitationId path int true "Invitation ID"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
+// @Failure 409 {object} map[string]interface{} "초대 대상이 이미 그 워크스페이스에 역할이 있음 (errorCode already_assigned|role_conflict)"
 // @Security BearerAuth
 // @Router /api/invitations/{invitationId}/approve [put]
 // @Id approveInvitation
@@ -240,6 +245,9 @@ func (h *WorkspaceInvitationHandler) ApproveInvitation(c echo.Context) error {
 	}
 
 	if err := h.invitationService.ApproveInvitation(uint(invitationID)); err != nil {
+		if code, body, ok := invitationRoleConflictResponse(err); ok {
+			return c.JSON(code, body)
+		}
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "invitation approved"})
@@ -267,4 +275,12 @@ func (h *WorkspaceInvitationHandler) RejectInvitationByAdmin(c echo.Context) err
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "invitation rejected"})
+}
+
+// invitationRoleConflictResponse 초대 수락·승인에서 이미 역할이 있으면 409 (역할 할당 API 와 같은 본문)
+func invitationRoleConflictResponse(err error) (int, map[string]interface{}, bool) {
+	if errors.Is(err, service.ErrWorkspaceRoleConflict) || errors.Is(err, service.ErrWorkspaceRoleAlreadyAssigned) {
+		return workspaceRoleAssignErrorResponse(err)
+	}
+	return 0, nil, false
 }

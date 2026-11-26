@@ -209,64 +209,20 @@ func (r *UserRepository) FindWorkspacesByUserID(userID uint) ([]*model.Workspace
 	return workspaces, nil
 }
 
-// GetUserRolesInWorkspace finds all roles assigned to a user within a specific workspace.
-func (r *UserRepository) FindUserRoleInWorkspace(userID, workspaceID uint) (*model.UserWorkspaceRole, error) {
-	var userWorkspaceRole model.UserWorkspaceRole
-	err := r.db.Where("user_id = ? AND workspace_id = ?", userID, workspaceID).
-		Preload("Workspace").
-		Preload("Role").
-		First(&userWorkspaceRole).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("user %d has no role assigned in workspace %d", userID, workspaceID)
-		}
-		return nil, fmt.Errorf("error finding user role in workspace: %w", err)
-	}
-	return &userWorkspaceRole, nil
-}
-
 // FindEffectiveUserRoleInWorkspace 사용자의 워크스페이스 유효 역할 단건 조회 (직접 우선, 없으면 그룹 상속).
-// 직접 배정이 있으면 그것을 쓰고, 없으면 소속 그룹의 워크스페이스 역할을 본다(P1-3/OPEN-016: 자동 부여 +
-// Union+dedup 직접 우선 결정). 여러 그룹이 같은 워크스페이스에 서로 다른 역할을 부여하는 경우(다중 매핑
-// 선택 규칙은 P4-3 미결)는 role_id 오름차순 첫 값으로 결정적으로 선택한다. 아무 역할도 없으면 (nil, nil).
+// 결정 규칙은 resolveWorkspaceRoles(workspace_role_resolution.go) 참고. 결과의 Source·GroupID 로 출처를 알 수 있다.
+// 아무 역할도 없으면 (nil, nil).
 func (r *UserRepository) FindEffectiveUserRoleInWorkspace(userID, workspaceID uint) (*model.EffectiveWorkspaceRole, error) {
-	var direct model.EffectiveWorkspaceRole
-	err := r.db.Raw(`
-		SELECT uwr.workspace_id, w.name AS workspace_name, uwr.role_id, rm.name AS role_name
-		FROM mcmp_user_workspace_roles uwr
-		JOIN mcmp_workspaces w ON w.id = uwr.workspace_id
-		JOIN mcmp_role_masters rm ON rm.id = uwr.role_id
-		WHERE uwr.user_id = ? AND uwr.workspace_id = ?
-	`, userID, workspaceID).Scan(&direct).Error
+	res, err := ResolveUserWorkspaceRole(r.db, userID, workspaceID)
 	if err != nil {
-		return nil, fmt.Errorf("error finding direct workspace role for user %d in workspace %d: %w", userID, workspaceID, err)
+		return nil, err
 	}
-	if direct.RoleID != 0 {
-		return &direct, nil
-	}
-
-	var groupRoles []model.EffectiveWorkspaceRole
-	err = r.db.Raw(`
-		SELECT DISTINCT gwr.workspace_id, w.name AS workspace_name, gwr.role_id, rm.name AS role_name
-		FROM mcmp_group_workspace_roles gwr
-		JOIN mcmp_user_organizations uo ON uo.organization_id = gwr.group_id
-		JOIN mcmp_workspaces w ON w.id = gwr.workspace_id
-		JOIN mcmp_role_masters rm ON rm.id = gwr.role_id
-		WHERE uo.user_id = ? AND gwr.workspace_id = ?
-		ORDER BY gwr.role_id ASC
-	`, userID, workspaceID).Scan(&groupRoles).Error
-	if err != nil {
-		return nil, fmt.Errorf("error finding group-inherited workspace role for user %d in workspace %d: %w", userID, workspaceID, err)
-	}
-	if len(groupRoles) == 0 {
-		return nil, nil
-	}
-	return &groupRoles[0], nil
+	return res.Effective, nil
 }
 
-// CreateUserWorkspaceRole 사용자를 워크스페이스에 추가
-func (r *UserRepository) CreateUserWorkspaceRole(userWorkspaceRole *model.UserWorkspaceRole) error {
-	return r.db.Create(userWorkspaceRole).Error
+// ResolveUserWorkspaceRole 사용자의 워크스페이스 역할 결정 결과 (직접 배정·그룹 역할·overridden 포함)
+func (r *UserRepository) ResolveUserWorkspaceRole(userID, workspaceID uint) (*model.WorkspaceRoleResolution, error) {
+	return ResolveUserWorkspaceRole(r.db, userID, workspaceID)
 }
 
 // DeleteUserWorkspaceRole 워크스페이스에서 사용자 제거

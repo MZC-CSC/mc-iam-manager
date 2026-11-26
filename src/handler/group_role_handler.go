@@ -247,7 +247,7 @@ func (h *GroupRoleHandler) RemoveGroupPlatformRole(c echo.Context) error {
 // @Produce json
 // @Param groupId path int true "그룹 ID"
 // @Param body body model.AssignGroupWorkspaceRequest true "워크스페이스 매핑 요청"
-// @Success 201 {object} map[string]string
+// @Success 201 {object} map[string]interface{} "message, warnings(직접 배정 때문에 그룹 역할이 적용되지 않는 멤버)"
 // @Failure 400 {object} map[string]string
 // @Failure 404 {object} map[string]string
 // @Failure 409 {object} map[string]string
@@ -281,7 +281,8 @@ func (h *GroupRoleHandler) AssignGroupWorkspace(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusCreated, map[string]string{"message": "그룹이 워크스페이스에 매핑되었습니다."})
+	return c.JSON(http.StatusCreated, groupWorkspaceRoleBody("그룹이 워크스페이스에 매핑되었습니다.",
+		h.groupRoleService.GroupWorkspaceOverrideWarnings(uint(groupID), req.WorkspaceID)))
 }
 
 // GetGroupWorkspaces godoc
@@ -317,7 +318,7 @@ func (h *GroupRoleHandler) GetGroupWorkspaces(c echo.Context) error {
 // @Param groupId path int true "그룹 ID"
 // @Param workspaceId path int true "워크스페이스 ID"
 // @Param body body model.UpdateGroupWorkspaceRoleRequest true "역할 변경 요청"
-// @Success 200 {object} map[string]string
+// @Success 200 {object} map[string]interface{} "message, warnings(직접 배정 때문에 그룹 역할이 적용되지 않는 멤버)"
 // @Failure 400 {object} map[string]string
 // @Failure 404 {object} map[string]string
 // @Security BearerAuth
@@ -352,7 +353,8 @@ func (h *GroupRoleHandler) UpdateGroupWorkspaceRole(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"message": "그룹 워크스페이스 역할이 변경되었습니다."})
+	return c.JSON(http.StatusOK, groupWorkspaceRoleBody("그룹 워크스페이스 역할이 변경되었습니다.",
+		h.groupRoleService.GroupWorkspaceOverrideWarnings(uint(groupID), uint(workspaceID))))
 }
 
 // RemoveGroupWorkspaceRole godoc
@@ -625,4 +627,14 @@ func (h *GroupRoleHandler) GetUserAccessSummary(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, summary)
+}
+
+// groupWorkspaceRoleBody 그룹 워크스페이스 역할 쓰기 응답: 기존 message 에, 직접 배정 때문에 그룹 역할이
+// 적용되지 않는 멤버가 있으면 warnings 를 더한다 (IAM-BUG-050)
+func groupWorkspaceRoleBody(message string, warnings []string) map[string]interface{} {
+	body := map[string]interface{}{"message": message}
+	if len(warnings) > 0 {
+		body["warnings"] = warnings
+	}
+	return body
 }

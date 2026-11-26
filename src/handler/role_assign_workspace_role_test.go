@@ -18,6 +18,7 @@ import (
 )
 
 // 워크스페이스 역할 할당 (POST /api/roles/assign/workspace-role, POST /api/roles/id/:roleId/assign)
+// 직접 배정은 (사용자, 워크스페이스)당 1개 (IAM-BUG-050).
 // 사용자: alice(1)=ws1 에 viewer(10) 소속, carol(3)=소속 없음.
 // 역할: viewer(10)·operator(12)=workspace, platonly(11)=platform 만.
 var assignWsRoleDBSeq int64
@@ -39,6 +40,12 @@ func setupAssignWorkspaceRoleDB(t *testing.T) *gorm.DB {
 		require.NoError(t, db.Exec(q).Error, q)
 	}
 	return db
+}
+
+func directRoles(db *gorm.DB, userID, wsID uint) []uint {
+	var ids []uint
+	db.Model(&model.UserWorkspaceRole{}).Where("user_id = ? AND workspace_id = ?", userID, wsID).Order("role_id").Pluck("role_id", &ids)
+	return ids
 }
 
 func callRoleHandler(t *testing.T, db *gorm.DB, path string, params map[string]string, body string, fn func(*RoleHandler, echo.Context) error) *httptest.ResponseRecorder {
@@ -70,10 +77,12 @@ func TestAssignWorkspaceRole_ErrorCodes(t *testing.T) {
 		contains   string
 		added      int64 // 기존 1행 대비 늘어난 행 수
 	}{
-		{"새 사용자 할당", `{"workspaceId":"1","userId":"3","roleId":"10"}`, http.StatusOK, "", 1},
-		{"이미 소속된 사용자에게 다른 역할 추가 허용", `{"workspaceId":"1","userId":"1","roleId":"12"}`, http.StatusOK, "", 1},
-		{"roleName 으로 할당", `{"workspaceId":"1","username":"carol","roleName":"operator"}`, http.StatusOK, "", 1},
-		{"같은 역할 중복", `{"workspaceId":"1","userId":"1","roleId":"10"}`, http.StatusConflict, "already assigned", 0},
+		{"새 사용자 할당 created", `{"workspaceId":"1","userId":"3","roleId":"10"}`, http.StatusOK, `"action":"created"`, 1},
+		{"다른 역할 있음 409 + currentRole", `{"workspaceId":"1","userId":"1","roleId":"12"}`, http.StatusConflict, `"currentRole":{"roleId":10,"roleName":"viewer"}`, 0},
+		{"replace 로 교체", `{"workspaceId":"1","userId":"1","roleId":"12","replace":true}`, http.StatusOK, `"previousRoleId":10`, 0},
+		{"roleName 으로 할당", `{"workspaceId":"1","username":"carol","roleName":"operator"}`, http.StatusOK, `"action":"created"`, 1},
+		{"같은 역할 중복", `{"workspaceId":"1","userId":"1","roleId":"10"}`, http.StatusConflict, `"errorCode":"already_assigned"`, 0},
+		{"같은 역할 replace 도 409", `{"workspaceId":"1","userId":"1","roleId":"10","replace":true}`, http.StatusConflict, `"errorCode":"already_assigned"`, 0},
 		{"없는 사용자", `{"workspaceId":"1","userId":"99","roleId":"10"}`, http.StatusNotFound, "user not found", 0},
 		{"없는 워크스페이스", `{"workspaceId":"99","userId":"3","roleId":"10"}`, http.StatusNotFound, "workspace not found", 0},
 		{"없는 역할 id", `{"workspaceId":"1","userId":"3","roleId":"999"}`, http.StatusNotFound, "role not found", 0},
@@ -104,13 +113,15 @@ func TestAssignRole_WorkspaceType_ErrorCodes(t *testing.T) {
 	}{
 		{"새 사용자 할당", `{"roleType":"workspace","workspaceId":"1","userId":"3","roleId":"10"}`, http.StatusOK, "", 1},
 		{"같은 역할 중복", `{"roleType":"workspace","workspaceId":"1","userId":"1","roleId":"10"}`, http.StatusConflict, "already assigned", 0},
+		{"다른 역할 409", `{"roleType":"workspace","workspaceId":"1","userId":"1","roleId":"12"}`, http.StatusConflict, `"errorCode":"role_conflict"`, 0},
+		{"replace 로 교체", `{"roleType":"workspace","workspaceId":"1","userId":"1","roleId":"12","replace":true}`, http.StatusOK, `"action":"replaced"`, 0},
 		{"없는 사용자", `{"roleType":"workspace","workspaceId":"1","userId":"99","roleId":"10"}`, http.StatusNotFound, "user not found", 0},
 		{"없는 워크스페이스", `{"roleType":"workspace","workspaceId":"99","userId":"3","roleId":"10"}`, http.StatusNotFound, "workspace not found", 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupAssignWorkspaceRoleDB(t)
-			rec := callRoleHandler(t, db, "/api/roles/id/10/assign", map[string]string{"roleId": "10"}, tc.body,
+			rec := callRoleHandler(t, db, "/api/roles/id/"+roleIDOf(tc.body)+"/assign", map[string]string{"roleId": "10"}, tc.body,
 				func(h *RoleHandler, c echo.Context) error { return h.AssignRole(c) })
 			require.Equal(t, tc.code, rec.Code, rec.Body.String())
 			if tc.contains != "" {
@@ -119,4 +130,60 @@ func TestAssignRole_WorkspaceType_ErrorCodes(t *testing.T) {
 			assert.Equal(t, 1+tc.added, countWsRoles(db))
 		})
 	}
+}
+
+func roleIDOf(body string) string {
+	i := strings.Index(body, `"roleId":"`)
+	if i < 0 {
+		return "0"
+	}
+	rest := body[i+len(`"roleId":"`):]
+	return rest[:strings.Index(rest, `"`)]
+}
+
+// replace 는 한 트랜잭션에서 교체: 남는 직접 배정은 새 역할 1개
+func TestAssignWorkspaceRole_ReplaceLeavesSingleRow(t *testing.T) {
+	db := setupAssignWorkspaceRoleDB(t)
+	rec := callRoleHandler(t, db, "/api/roles/assign/workspace-role", nil, `{"workspaceId":"1","userId":"1","roleId":"12","replace":true}`,
+		func(h *RoleHandler, c echo.Context) error { return h.AssignWorkspaceRole(c) })
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []uint{12}, directRoles(db, 1, 1))
+}
+
+// 기존 데이터에 직접 배정이 여러 개 남아 있으면: currentRole 은 role_id 가 가장 작은 것, replace 후 1개로 정리
+func TestAssignWorkspaceRole_LegacyDuplicateRows(t *testing.T) {
+	db := setupAssignWorkspaceRoleDB(t)
+	require.NoError(t, db.Exec(`INSERT INTO mcmp_user_workspace_roles (user_id, workspace_id, role_id) VALUES (1, 1, 12)`).Error)
+	assign := func(h *RoleHandler, c echo.Context) error { return h.AssignWorkspaceRole(c) }
+
+	rec := callRoleHandler(t, db, "/api/roles/assign/workspace-role", nil, `{"workspaceId":"1","userId":"1","roleId":"12"}`, assign)
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"currentRole":{"roleId":10,"roleName":"viewer"}`)
+
+	rec = callRoleHandler(t, db, "/api/roles/assign/workspace-role", nil, `{"workspaceId":"1","userId":"1","roleId":"10","replace":true}`, assign)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []uint{10}, directRoles(db, 1, 1), "유효 역할과 같은 역할로 replace 하면 나머지 중복만 정리")
+}
+
+// 그 워크스페이스에 다른 그룹 역할이 있으면 warnings (막지 않음)
+func TestAssignWorkspaceRole_GroupOverrideWarning(t *testing.T) {
+	db := setupAssignWorkspaceRoleDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Organization{}, &model.UserOrganization{}, &model.GroupWorkspaceRole{}))
+	for _, q := range []string{
+		`INSERT INTO mcmp_organizations (id, name, organization_code) VALUES (50, 'team-a', 'team-a')`,
+		`INSERT INTO mcmp_user_organizations (user_id, organization_id) VALUES (3, 50)`,
+		`INSERT INTO mcmp_group_workspace_roles (group_id, workspace_id, role_id) VALUES (50, 1, 12)`,
+	} {
+		require.NoError(t, db.Exec(q).Error, q)
+	}
+	assign := func(h *RoleHandler, c echo.Context) error { return h.AssignWorkspaceRole(c) }
+
+	rec := callRoleHandler(t, db, "/api/roles/assign/workspace-role", nil, `{"workspaceId":"1","userId":"3","roleId":"10"}`, assign)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "그룹 team-a(id=50) 의 역할 operator 대신 직접 배정 viewer 가 적용됩니다")
+
+	// 그룹 역할과 같은 역할로 바꾸면 경고 없음
+	rec = callRoleHandler(t, db, "/api/roles/assign/workspace-role", nil, `{"workspaceId":"1","userId":"3","roleId":"12","replace":true}`, assign)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.NotContains(t, rec.Body.String(), "warnings")
 }

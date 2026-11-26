@@ -340,18 +340,6 @@ func (r *RoleRepository) AssignWorkspaceRole(userID, workspaceID, roleID uint) e
 	return r.db.Create(&userWorkspaceRole).Error
 }
 
-// HasUserWorkspaceRole 같은 (사용자, 워크스페이스, 역할) 할당이 있는지 확인
-func (r *RoleRepository) HasUserWorkspaceRole(userID, workspaceID, roleID uint) (bool, error) {
-	var count int64
-	err := r.db.Model(&model.UserWorkspaceRole{}).
-		Where("user_id = ? AND workspace_id = ? AND role_id = ?", userID, workspaceID, roleID).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
 // RemoveWorkspaceRole 워크스페이스 역할 제거
 func (r *RoleRepository) RemoveWorkspaceRole(userID, workspaceID, roleID uint) error {
 	return r.db.Where("user_id = ? AND workspace_id = ? AND role_id = ?", userID, workspaceID, roleID).
@@ -1166,25 +1154,15 @@ func (r *RoleRepository) FindEffectivePlatformRoles(userID uint) ([]model.RoleMa
 	return roles, nil
 }
 
-// FindEffectiveWorkspaceRoles 사용자의 유효 워크스페이스 역할 목록 조회 (직접 할당 + 그룹 상속 통합, 중복 제거)
+// FindEffectiveWorkspaceRoles 사용자의 유효 워크스페이스 역할 목록 조회 (직접 할당 + 그룹 상속 통합, 중복 제거).
+// (워크스페이스, 역할) 마다 한 행이고, 행마다 출처(source·group_id)와 그 워크스페이스의 결정 결과
+// (is_effective·effective_role·group_roles·overridden)를 싣는다. 결정 규칙은 resolveWorkspaceRoles 참고.
 func (r *RoleRepository) FindEffectiveWorkspaceRoles(userID uint) ([]model.EffectiveWorkspaceRole, error) {
-	var roles []model.EffectiveWorkspaceRole
-	err := r.db.Raw(`
-		SELECT DISTINCT uwr.workspace_id, w.name AS workspace_name, uwr.role_id, rm.name AS role_name
-		FROM (
-			SELECT workspace_id, role_id FROM mcmp_user_workspace_roles WHERE user_id = ?
-			UNION
-			SELECT gwr.workspace_id, gwr.role_id FROM mcmp_group_workspace_roles gwr
-			JOIN mcmp_user_organizations uo ON uo.organization_id = gwr.group_id
-			WHERE uo.user_id = ?
-		) uwr
-		JOIN mcmp_workspaces w ON w.id = uwr.workspace_id
-		JOIN mcmp_role_masters rm ON rm.id = uwr.role_id
-	`, userID, userID).Scan(&roles).Error
+	res, err := resolveWorkspaceRoles(r.db, userID, 0)
 	if err != nil {
 		return nil, err
 	}
-	return roles, nil
+	return effectiveRoleRows(res), nil
 }
 
 // containsRoleType roleTypes 슬라이스에 특정 roleType이 포함되어 있는지 확인

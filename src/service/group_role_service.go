@@ -175,6 +175,42 @@ func (s *GroupRoleService) UpdateGroupWorkspaceRole(groupID, workspaceID, roleID
 	return s.groupRoleRepo.UpdateGroupWorkspaceRole(groupID, workspaceID, roleID)
 }
 
+// GroupWorkspaceOverrideWarnings 그룹의 워크스페이스 역할이 직접 배정 때문에 적용되지 않는 멤버를 경고로 만든다 (막지 않음, IAM-BUG-050).
+// 직접 배정이 그룹 역할과 같은 멤버는 넣지 않는다. 조회 실패는 경고 없이 넘어간다.
+func (s *GroupRoleService) GroupWorkspaceOverrideWarnings(groupID, workspaceID uint) []string {
+	type row struct {
+		UserID         uint
+		Username       string
+		DirectRoleName string
+		GroupRoleName  string
+	}
+	var rows []row
+	err := s.db.Raw(`
+		SELECT u.id AS user_id, u.username, drm.name AS direct_role_name, grm.name AS group_role_name
+		FROM mcmp_group_workspace_roles gwr
+		JOIN mcmp_role_masters grm ON grm.id = gwr.role_id
+		JOIN mcmp_user_organizations uo ON uo.organization_id = gwr.group_id
+		JOIN mcmp_users u ON u.id = uo.user_id
+		JOIN mcmp_user_workspace_roles uwr ON uwr.user_id = uo.user_id AND uwr.workspace_id = gwr.workspace_id
+		JOIN mcmp_role_masters drm ON drm.id = uwr.role_id
+		WHERE gwr.group_id = ? AND gwr.workspace_id = ? AND uwr.role_id <> gwr.role_id
+		ORDER BY u.id ASC, uwr.role_id ASC
+	`, groupID, workspaceID).Scan(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	warnings := make([]string, 0, len(rows))
+	seen := map[uint]bool{}
+	for _, r := range rows {
+		if seen[r.UserID] {
+			continue // 기존 중복 직접 배정: 유효 역할(role_id 가 가장 작은 것)만 표시
+		}
+		seen[r.UserID] = true
+		warnings = append(warnings, fmt.Sprintf("멤버 %s(id=%d) 는 직접 배정 %s 가 적용되어 그룹 역할 %s 가 적용되지 않습니다", r.Username, r.UserID, r.DirectRoleName, r.GroupRoleName))
+	}
+	return warnings
+}
+
 // RemoveGroupWorkspaceRole 그룹-워크스페이스 매핑 제거
 func (s *GroupRoleService) RemoveGroupWorkspaceRole(groupID, workspaceID uint) error {
 	return s.groupRoleRepo.DeleteGroupWorkspaceRole(groupID, workspaceID)

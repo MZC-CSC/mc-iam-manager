@@ -44,6 +44,8 @@ type CspValidationResponse struct {
 	Error       string             `json:"error,omitempty"`
 	Steps       []ValidationStep   `json:"steps"`                // 항상 전체 단계 포함
 	Credentials *CredentialSummary `json:"credentials,omitempty"` // valid=true일 때만
+	// UsedRole 진단에 사용한 워크스페이스 역할과 출처 (발급과 같은 결정 규칙). 역할이 없으면 생략
+	UsedRole *UsedWorkspaceRole `json:"usedRole,omitempty"`
 }
 
 // CredentialSummary 발급된 자격증명 요약 (secret은 미포함)

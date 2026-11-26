@@ -19,8 +19,12 @@ type mockValUserRepo struct {
 	roleErr error
 }
 
-func (m *mockValUserRepo) FindUserRoleInWorkspace(userID, workspaceID uint) (*model.UserWorkspaceRole, error) {
-	return m.role, m.roleErr
+// FindEffectiveUserRoleInWorkspace 기존 fixture(직접 배정 행)를 유효 역할(direct)로 돌려준다
+func (m *mockValUserRepo) FindEffectiveUserRoleInWorkspace(userID, workspaceID uint) (*model.EffectiveWorkspaceRole, error) {
+	if m.roleErr != nil || m.role == nil {
+		return nil, m.roleErr
+	}
+	return &model.EffectiveWorkspaceRole{WorkspaceID: m.role.WorkspaceID, RoleID: m.role.RoleID, Source: model.WorkspaceRoleSourceDirect}, nil
 }
 
 type mockValMappingRepo struct {

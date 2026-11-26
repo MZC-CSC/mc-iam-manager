@@ -16,7 +16,8 @@ import (
 
 // valUserRepo 테스트 주입을 위한 UserRepository 인터페이스
 type valUserRepo interface {
-	FindUserRoleInWorkspace(userID, workspaceID uint) (*model.UserWorkspaceRole, error)
+	// 발급(CspCredentialService)과 같은 역할 결정 (직접 배정 우선, 없으면 그룹 역할)
+	FindEffectiveUserRoleInWorkspace(userID, workspaceID uint) (*model.EffectiveWorkspaceRole, error)
 }
 
 // valMappingRepo 테스트 주입을 위한 CspMappingRepository 인터페이스
@@ -377,6 +378,18 @@ func (s *CspValidationService) ValidateCredentials(ctx context.Context, userID u
 		return nil, fmt.Errorf("invalid workspaceId: %s", req.WorkspaceID)
 	}
 
+	resp, err := s.dispatchValidation(ctx, userID, kcUserID, workspaceIDInt, cspType, authMethod, steps)
+	if err == nil && resp != nil {
+		// 응답에 사용한 역할(발급과 같은 결정)을 싣는다. 조회 실패는 진단 결과에 영향을 주지 않는다
+		if used, rerr := s.resolveUserRepo().FindEffectiveUserRoleInWorkspace(userID, workspaceIDInt); rerr == nil {
+			resp.UsedRole = used.ToUsedRole()
+		}
+	}
+	return resp, err
+}
+
+// dispatchValidation CSP·인증 방식별 단계 검증으로 보낸다
+func (s *CspValidationService) dispatchValidation(ctx context.Context, userID uint, kcUserID string, workspaceIDInt uint, cspType, authMethod string, steps []model.ValidationStep) (*model.CspValidationResponse, error) {
 	switch cspType {
 	case "aws":
 		switch authMethod {
@@ -403,7 +416,7 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
 	if !stepRunner(steps, 0, nil, func() (string, error) {
-		userRole, err := s.resolveUserRepo().FindUserRoleInWorkspace(userID, workspaceID)
+		userRole, err := s.resolveUserRepo().FindEffectiveUserRoleInWorkspace(userID, workspaceID)
 		if err != nil || userRole == nil {
 			return "", fmt.Errorf("워크스페이스 역할 없음 — DB에 auth_method=OIDC 매핑 추가 필요")
 		}
@@ -415,7 +428,7 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 			return "", fmt.Errorf("OIDC 매핑 없음 — mcmp_role_csp_role_mappings에 auth_method=OIDC 레코드 추가 필요")
 		}
 		mapping = m
-		return fmt.Sprintf("roleID=%d → cspRoleID=%d", userRole.RoleID, m.CspRoles[0].ID), nil
+		return fmt.Sprintf("roleID=%d(%s, %s) → cspRoleID=%d", userRole.RoleID, userRole.RoleName, userRole.Source, m.CspRoles[0].ID), nil
 	}) {
 		return buildFailedResponse(cspType, authMethod, 1, steps), nil
 	}
@@ -504,7 +517,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
 	if !stepRunner(steps, 0, nil, func() (string, error) {
-		userRole, err := s.resolveUserRepo().FindUserRoleInWorkspace(userID, workspaceID)
+		userRole, err := s.resolveUserRepo().FindEffectiveUserRoleInWorkspace(userID, workspaceID)
 		if err != nil || userRole == nil {
 			return "", fmt.Errorf("워크스페이스 역할 없음 — DB에 auth_method=SAML 매핑 추가 필요")
 		}
@@ -516,7 +529,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 			return "", fmt.Errorf("SAML 매핑 없음 — mcmp_role_csp_role_mappings에 auth_method=SAML 레코드 추가 필요")
 		}
 		mapping = m
-		return fmt.Sprintf("roleID=%d → cspRoleID=%d", userRole.RoleID, m.CspRoles[0].ID), nil
+		return fmt.Sprintf("roleID=%d(%s, %s) → cspRoleID=%d", userRole.RoleID, userRole.RoleName, userRole.Source, m.CspRoles[0].ID), nil
 	}) {
 		return buildFailedResponse(cspType, authMethod, 1, steps), nil
 	}
@@ -617,7 +630,7 @@ func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, use
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
 	if !stepRunner(steps, 0, nil, func() (string, error) {
-		userRole, err := s.resolveUserRepo().FindUserRoleInWorkspace(userID, workspaceID)
+		userRole, err := s.resolveUserRepo().FindEffectiveUserRoleInWorkspace(userID, workspaceID)
 		if err != nil || userRole == nil {
 			return "", fmt.Errorf("워크스페이스 역할 없음")
 		}
@@ -629,7 +642,7 @@ func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, use
 			return "", fmt.Errorf("SECRET_KEY 매핑 없음 — mcmp_role_csp_role_mappings에 auth_method=SECRET_KEY 레코드 추가 필요")
 		}
 		mapping = m
-		return fmt.Sprintf("roleID=%d → cspRoleID=%d", userRole.RoleID, m.CspRoles[0].ID), nil
+		return fmt.Sprintf("roleID=%d(%s, %s) → cspRoleID=%d", userRole.RoleID, userRole.RoleName, userRole.Source, m.CspRoles[0].ID), nil
 	}) {
 		return buildFailedResponse(cspType, authMethod, 1, steps), nil
 	}
@@ -673,7 +686,7 @@ func (s *CspValidationService) validateGCPWithOIDC(ctx context.Context, userID u
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
 	if !stepRunner(steps, 0, nil, func() (string, error) {
-		userRole, err := s.resolveUserRepo().FindUserRoleInWorkspace(userID, workspaceID)
+		userRole, err := s.resolveUserRepo().FindEffectiveUserRoleInWorkspace(userID, workspaceID)
 		if err != nil || userRole == nil {
 			return "", fmt.Errorf("워크스페이스 역할 없음")
 		}
@@ -685,7 +698,7 @@ func (s *CspValidationService) validateGCPWithOIDC(ctx context.Context, userID u
 			return "", fmt.Errorf("GCP OIDC 매핑 없음 — auth_method=OIDC, csp_type=gcp 레코드 추가 필요")
 		}
 		mapping = m
-		return fmt.Sprintf("roleID=%d → cspRoleID=%d", userRole.RoleID, m.CspRoles[0].ID), nil
+		return fmt.Sprintf("roleID=%d(%s, %s) → cspRoleID=%d", userRole.RoleID, userRole.RoleName, userRole.Source, m.CspRoles[0].ID), nil
 	}) {
 		return buildFailedResponse(cspType, authMethod, 1, steps), nil
 	}
