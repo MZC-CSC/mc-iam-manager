@@ -963,6 +963,74 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/csp-accounts/id/{accountId}/readiness": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "CSP 계정의 임시자격증명 연동 준비 상태를 단계별로 반환합니다 (쓰기 없음).\n① Keycloak OIDC 클라이언트 ② CSP 계정 ③ IdP Config ④ Provider 신뢰(연결 테스트) ⑤ CSP Role ⑥ 역할 매핑 ⑦ 실제 assume.\n대상 CSP Role 은 같은 CSP 타입이면서 csp_account_id 가 이 계정이거나 미기록인 역할입니다.\n④·⑦ 은 CSP 를 실제로 호출하므로 PlatformAdmin 일 때만 수행하고, ⑦ 은 checkIssue=true 일 때만 수행합니다. 자격증명은 반환하지 않습니다.\n⑦ 을 수행할 때 AWS OIDC·SAML Role 마다 신뢰 정책 판정(cspRoles[].trustPolicy: ok·missing·mismatch·not_found·error)을 참고 정보로 붙입니다. 관리용 자격증명으로 읽기만 하며, ⑦ 판정은 실제 assume 결과로만 정합니다. missing·mismatch 이면 POST /api/csp-target-roles/id/{id}/trust-policy/sync 를 안내합니다.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "csp-accounts"
+                ],
+                "summary": "Get CSP account readiness",
+                "operationId": "getCspAccountReadiness",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "accountId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "⑦ 실제 assume 수행 여부 (PlatformAdmin 만 유효)",
+                        "name": "checkIssue",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.CspAccountReadinessResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/csp-accounts/id/{accountId}/validate": {
             "post": {
                 "security": [
@@ -970,7 +1038,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Validate CSP account by checking actual CSP infrastructure (IDP provider existence, role trust policy, or credential validity) for each linked CspRole",
+                "description": "Validate CSP account by checking actual CSP infrastructure (IDP provider existence, role trust policy, or credential validity) for each linked CspRole\nAWS OIDC·SAML roles are checked with the management role of the IdP config (no server AWS credentials needed): provider existence (OIDC audience included) and the trust policy (Federated, Action, aud). Each result carries trust_policy with the same verdict as the credential validation API.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1586,6 +1654,118 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/csp-idp-configs/id/{configId}/trust-policy/check": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Check every CSP target role of the IdP config against the statement of this IdP config's auth method. Nothing is written. Management roles (protected) and non-aws roles (invalid_request) are reported and skipped.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "csp-idp-configs"
+                ],
+                "summary": "Check trust policies of the target roles of an IdP config",
+                "operationId": "checkCspIdpConfigTrustPolicy",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "IdP config ID",
+                        "name": "configId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.TrustPolicyBulkResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/csp-idp-configs/id/{configId}/trust-policy/sync": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sync every CSP target role of the IdP config with the statement of this IdP config's auth method (same rules as the single-role sync). dryRun is true by default. Each item has a status (unchanged, would_change, applied, registered_role, protected, not_found, invalid_request, error); one failure does not stop the others. 400 when the IdP config is inactive.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "csp-idp-configs"
+                ],
+                "summary": "Sync trust policies of the target roles of an IdP config",
+                "operationId": "syncCspIdpConfigTrustPolicy",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "IdP config ID",
+                        "name": "configId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "dryRun (default true), allowRegistered (default false)",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/model.TrustPolicySyncRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.TrustPolicyBulkResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/csp-idp-configs/list": {
             "post": {
                 "security": [
@@ -1685,7 +1865,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Create a new CSP policy",
+                "description": "Create a CSP policy definition.\n- inline: policy_doc required; stored in IAM and written into one CSP role on attach.\n- managed: an AWS managed policy ARN (arn:aws:iam::aws:policy/...) only; attach and detach only.\n- custom (customer managed): with policy_arn, registers an existing policy; without policy_arn, IAM creates it in AWS (CreatePolicy) as mciam-\u003cname\u003e from policy_doc.\nDocuments with an Allow statement using Action \"*\", \"iam:*\" or NotAction are rejected (403 forbidden_policy). 409 when the name exists in IAM or (custom) in AWS. 502 when AWS fails (nothing is saved).",
                 "consumes": [
                     "application/json"
                 ],
@@ -1724,8 +1904,35 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1743,7 +1950,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Attach a CSP policy to a CSP role",
+                "description": "Attach a CSP policy to a CSP role and apply it in AWS (managed: AttachRolePolicy, inline: PutRolePolicy).\nIf the AWS call fails, the mapping is kept with aws_status=failed and the response is 200 with result=failed and warnings; requesting again re-applies it.\nRejected without changes: 400 invalid request (no ARN/document, custom type, account mismatch), 403 forbidden_policy (non mciam-* role or denied policy), 404 role/policy not found, 409 management role. 500 only when the database update fails (the AWS change is reverted).",
                 "consumes": [
                     "application/json"
                 ],
@@ -1770,10 +1977,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/model.PolicyBindingResult"
                         }
                     },
                     "400": {
@@ -1785,8 +1989,26 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1813,7 +2035,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Detach a CSP policy from a CSP role",
+                "description": "Detach a CSP policy from a CSP role in AWS (managed: DetachRolePolicy, inline: DeleteRolePolicy), then remove the mapping. NoSuchEntity from AWS counts as already detached.\nIf the AWS call fails, the mapping is kept with aws_status=detach_failed and the response is 200 with result=detach_failed and warnings; requesting again retries.\nRejected without changes: 400, 403 forbidden_policy (non mciam-* role), 404 (role/policy not found or not attached), 409 management role. 500 only when the database update fails.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1840,10 +2062,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/model.PolicyBindingResult"
                         }
                     },
                     "400": {
@@ -1855,8 +2074,26 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1946,7 +2183,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Update CSP policy details",
+                "description": "Update a CSP policy definition and apply document changes in AWS.\n- custom (mciam-* only, else 403): new default version (CreatePolicyVersion; the oldest non-default version is removed at the 5-version limit). AWS first; on failure 502 and nothing is saved.\n- inline: the document is saved, then written to the attached CSP role (PutRolePolicy). If that fails the response is 200 with warnings and the mapping is marked failed; attach again to retry. 409 when attached to more than one role.\n- managed: documents cannot be changed (400).\nWhile attached in AWS, renaming an inline policy or changing policy_arn returns 409. Connections whose attach failed (aws_status=failed) do not block it; attach again after the change. Forbidden documents return 403.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1980,11 +2217,20 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.CspPolicy"
+                            "$ref": "#/definitions/model.CspPolicyChangeResult"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2001,8 +2247,26 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2018,7 +2282,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Delete a CSP policy by ID",
+                "description": "Delete a CSP policy definition. 409 while attached to CSP roles.\nFor a custom policy named mciam-*, the AWS policy is deleted too (non-default versions first); 409 when it is attached to AWS entities outside IAM, 502 when AWS fails. Other policies are only unregistered.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2061,8 +2325,26 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2197,7 +2479,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get list of policies attached to a CSP role",
+                "description": "Get list of policies attached to a CSP role, with the AWS state of each mapping (aws_status: applied | failed | detach_failed, empty for mappings made before AWS was applied; last_error; applied_at)",
                 "consumes": [
                     "application/json"
                 ],
@@ -2224,7 +2506,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/model.CspPolicy"
+                                "$ref": "#/definitions/model.CspRolePolicy"
                             }
                         }
                     },
@@ -2256,7 +2538,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Synchronize policies from the CSP cloud",
+                "description": "Import policies from the CSP. AWS managed policies are stored as managed; customer managed policies are imported only when named mciam-* (as custom). Existing rows are matched by ARN within the account",
                 "consumes": [
                     "application/json"
                 ],
@@ -2310,6 +2592,80 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/csp-target-roles/id/{roleId}/trust-policy/sync": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Compare the AWS trust policy of the target role with the expected statements built from its IdP config (OIDC: Federated oidc_provider_arn, sts:AssumeRoleWithWebIdentity, \u003chost\u003e:aud = audience; SAML: Federated saml_provider_arn, sts:AssumeRoleWithSAML, SAML:aud) and fix only what differs.\nOnly Allow statements whose Federated is the expected provider are treated as IAM statements: the expected Action is added and the aud condition is set. Other statements and condition keys are kept. A missing statement is added.\ndryRun is true by default (changes only). Nothing is written when the verdict is already ok.\nRoles registered from an existing AWS role (origin registered or empty) need allowRegistered=true when there is something to change: 409 registered_role with before, after and changes.\n409 protected for the management role, 400 when the IdP config is inactive or the expected statements cannot be built, 404 when the role does not exist in AWS, 502 when AWS fails.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "csp-target-roles"
+                ],
+                "summary": "Sync the trust policy of a CSP target role",
+                "operationId": "syncCspTargetRoleTrustPolicy",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSP target role ID",
+                        "name": "roleId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "dryRun (default true), allowRegistered (default false)",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/model.TrustPolicySyncRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.TrustPolicySyncResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/csp/iam/roles": {
             "post": {
                 "security": [
@@ -2317,7 +2673,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "CSP에 IAM 역할을 직접 생성합니다",
+                "description": "Disabled (IAM-BUG-046): always 400. Use POST /api/roles/csp to create or register a CSP role (the trust policy is built from the IdP config).",
                 "consumes": [
                     "application/json"
                 ],
@@ -2336,15 +2692,6 @@ const docTemplate = `{
                         "name": "csp_account_id",
                         "in": "query",
                         "required": true
-                    },
-                    {
-                        "description": "IAM 역할 정보",
-                        "name": "role",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/csp.Role"
-                        }
                     }
                 ],
                 "responses": {
@@ -2385,7 +2732,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "CSP에서 특정 IAM 역할 정보를 조회합니다",
+                "description": "Get an AWS IAM role with the management role of the account (active aws OIDC IdP config). The trust policy is returned as is.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2417,7 +2764,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/csp.Role"
+                            "$ref": "#/definitions/model.AwsRoleView"
                         }
                     },
                     "400": {
@@ -2446,6 +2793,13 @@ const docTemplate = `{
                                 "type": "string"
                             }
                         }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
                     }
                 }
             },
@@ -2455,7 +2809,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "CSP의 IAM 역할 정보를 수정합니다",
+                "description": "Disabled (IAM-BUG-046): always 400. It replaced the whole trust policy without Federated and Condition. Use POST /api/csp-target-roles/id/{id}/trust-policy/sync.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2481,15 +2835,6 @@ const docTemplate = `{
                         "name": "csp_account_id",
                         "in": "query",
                         "required": true
-                    },
-                    {
-                        "description": "IAM 역할 수정 정보",
-                        "name": "role",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/csp.Role"
-                        }
                     }
                 ],
                 "responses": {
@@ -2528,7 +2873,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "CSP에서 IAM 역할을 삭제합니다",
+                "description": "Disabled (IAM-BUG-046): always 400. Use DELETE /api/roles/csp/id/{id} (detaches IAM policies and keeps registered roles in AWS).",
                 "consumes": [
                     "application/json"
                 ],
@@ -3317,7 +3662,7 @@ const docTemplate = `{
         },
         "/api/initial-admin": {
             "post": {
-                "description": "Creates the initial platform admin user with necessary permissions. platform admin 생성인데",
+                "description": "Creates the initial platform admin user with necessary permissions. Unauthenticated, so it is refused with 403 once a platformAdmin user exists (after installation).",
                 "consumes": [
                     "application/json"
                 ],
@@ -3343,6 +3688,12 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "platform admin is already initialized",
                         "schema": {
                             "$ref": "#/definitions/model.Response"
                         }
@@ -6649,6 +7000,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "409": {
+                        "description": "management role (IdP Config role_arn) is protected",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -6700,6 +7060,15 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "management role (IdP Config role_arn) is protected",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7129,8 +7498,67 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "409": {
+                        "description": "management role (IdP Config role_arn) is protected",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/roles/csp/check": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "대상 CSP Role 이 IAM(DB)·CSP 에 있는지만 확인한다. DB·CSP 에 쓰지 않는다.\nexists_in_db·exists_in_csp 인 aws Role 에는 trustPolicy(신뢰 정책 판정)를 붙인다: 소속 IdP Config 로 만든 기대값(Federated·Action·aud, OIDC·SAML)과 AWS 실제 신뢰 정책 비교.\ntrustPolicy.status: ok | missing | mismatch | not_found | error, statements[] 인증 방식별 판정, extra[] IAM 이 쓰지 않은 statement(정보성). 판정이 나빠도 항목 status 는 바뀌지 않는다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "roles"
+                ],
+                "summary": "Check target CSP roles",
+                "operationId": "checkCspRoles",
+                "parameters": [
+                    {
+                        "description": "cspRoles (cspRoleName, cspType, authMethod, cspIdpConfigId)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.checkCspRolesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7248,6 +7676,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "409": {
+                        "description": "management role (IdP Config role_arn) is protected",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -7265,7 +7702,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "CspRole(mcmp_role_csp_roles) 레코드를 삭제합니다. 이 레코드를 참조하는 RoleMaster-CspRole\n매핑을 먼저 정리한 뒤 레코드를 삭제하며, AWS인 경우 실제 클라우드 Role도 함께 삭제합니다.\nRoleMaster/RoleSub(csp)는 건드리지 않습니다 — 그 삭제는 DeleteCspRoleMaster를 사용하세요.",
+                "description": "Delete a CSP role (mcmp_role_csp_roles). Role masters and their csp sub are kept (use DeleteCspRoleMaster for those).\n1) The management role (IdP Config role_arn) is protected: 409 protected.\n2) Policies attached through IAM are detached in AWS first. If a detach fails, the attachment is kept with aws_status=detach_failed and the response is 200 with result=detach_failed, bindingResults and warnings; the CSP role and its role master mappings are kept. Send the request again after fixing the cause.\n3) Roles that IAM created in AWS (origin=created): if the AWS role has policies or instance profiles that IAM did not attach, 409 conflict with unmanagedAttachedPolicies, unmanagedInlinePolicies and instanceProfiles, and nothing is changed. Otherwise the AWS role is deleted (already deleted in AWS is fine). A missing list permission returns 502 csp_error with the permission name.\n4) Roles that already existed in AWS (origin=registered or empty): the AWS role is kept and only the IAM registration is removed.\n5) Role master mappings, policy mappings and the CSP role row are deleted in one transaction: 204.\n400 when the IdP config needed for AWS calls cannot be determined (set cspIdpConfigId with PUT /api/roles/csp/id/{roleId}).",
                 "consumes": [
                     "application/json"
                 ],
@@ -7287,6 +7724,12 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "a policy detach failed; nothing else was deleted",
+                        "schema": {
+                            "$ref": "#/definitions/model.CspRoleDeleteResult"
+                        }
+                    },
                     "204": {
                         "description": "No Content"
                     },
@@ -7294,27 +7737,35 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "additionalProperties": true
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "management role, or the AWS role has policies or instance profiles that IAM did not attach",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "additionalProperties": true
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -9238,7 +9689,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Register or update menus from a local YAML file specified by the filePath query parameter, or from the MC_WEB_CONSOLE_MENUYAML URL in .env if not provided. If loaded from URL, the file is saved to asset/menu/menu.yaml.",
+                "description": "Seed menus from a local YAML file specified by the filePath query parameter, or from MC_WEB_CONSOLE_MENUYAML in .env if not provided (a local path is read as-is; a URL is downloaded and cached to asset/menu/menu.yaml). If the DB already has menus the call is skipped (200, skipped=true) unless force=true, in which case current role-menu mappings are backed up to asset/menu/backups/ first (backupPath) and menus are upserted. Also chains into role-menu permission seeding (asset/menu/permission.yaml); if that step fails, the response still returns 200 but includes permissionsWarning. Menu ids that exist in the DB but are absent from this yaml are reported (not deleted) via orphanMenusDetected; permission.yaml menu ids missing from the DB are reported via missingPermissionMenuIDs (mapping skipped).",
                 "consumes": [
                     "application/json"
                 ],
@@ -9248,7 +9699,7 @@ const docTemplate = `{
                 "tags": [
                     "menus"
                 ],
-                "summary": "Register/Update menus from YAML file or URL",
+                "summary": "Seed menus from YAML file or URL (first install; force to re-seed)",
                 "operationId": "registerMenusFromYAML",
                 "parameters": [
                     {
@@ -9256,16 +9707,20 @@ const docTemplate = `{
                         "description": "YAML file path (optional, uses .env URL or default local path if not provided)",
                         "name": "filePath",
                         "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Re-seed even if menus already exist (backs up role permissions first)",
+                        "name": "force",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "message: Successfully registered menus from YAML",
+                        "description": "skipped, existingMenuCount, message; when not skipped: registeredCount, backupPath/backupWarning (force only), permissionsWarning, orphanMenusDetected, missingPermissionMenuIDs",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "additionalProperties": true
                         }
                     },
                     "500": {
@@ -9287,7 +9742,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Parse YAML text in the request body and register or update menus in the database. Recommended Content-Type: text/plain, text/yaml, application/yaml.",
+                "description": "Parse YAML text in the request body and seed menus into the database. Same first-install guard as initial-menus: skipped (200, skipped=true) when menus already exist unless force=true (role permissions backed up first). Does not chain permission seeding. Recommended Content-Type: text/plain, text/yaml, application/yaml.",
                 "consumes": [
                     "text/plain"
                 ],
@@ -9297,9 +9752,15 @@ const docTemplate = `{
                 "tags": [
                     "menus"
                 ],
-                "summary": "Register/Update menus from YAML in request body",
+                "summary": "Seed menus from YAML in request body (first install; force to re-seed)",
                 "operationId": "registerMenusFromBody",
                 "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Re-seed even if menus already exist (backs up role permissions first)",
+                        "name": "force",
+                        "in": "query"
+                    },
                     {
                         "example": "\"menus:\\n  - id: new-item\\n    parentid: dashboard\\n    displayname: New Menu Item\\n    restype: menu\\n    isaction: false\\n    priority: 10\\n    menunumber: 9999\"",
                         "description": "Menu definitions in YAML format (must contain 'menus:' root key)",
@@ -9313,12 +9774,10 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "message: Successfully registered menus from request body",
+                        "description": "skipped, existingMenuCount, message; when not skipped: registeredCount, backupPath/backupWarning (force only)",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "additionalProperties": true
                         }
                     },
                     "400": {
@@ -9349,7 +9808,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "YAML 시드 파일에서 기본 조직 구조(mcmp + 8개 프레임워크)를 로드하여 등록합니다. 멱등성 보장.",
+                "description": "YAML 시드 파일에서 기본 조직 구조를 로드하여 등록합니다. 멱등성 보장.\n경로는 filePath 쿼리 파라미터 \u003e MC_IAM_MANAGER_ORG 환경변수 \u003e 번들된 asset/organization/organizations.yaml 순으로 결정됩니다.",
                 "produces": [
                     "application/json"
                 ],
@@ -9358,52 +9817,10 @@ const docTemplate = `{
                 ],
                 "summary": "기본 조직 초기화",
                 "operationId": "setupInitialOrganizations",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/setup/initial-role-menu-permission": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Deprecated. permission.csv로 메뉴 권한을 초기화합니다. 제거 예정이니 InitializeMenuPermissionsFromYAML을 사용하세요.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Initialize menu permissions from CSV (deprecated)",
-                "operationId": "initializeMenuPermissions",
-                "deprecated": true,
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "CSV file path (optional, default asset/menu/permission.csv)",
+                        "description": "조직 시드 YAML 경로. 미지정 시 MC_IAM_MANAGER_ORG 또는 번들 asset 사용",
                         "name": "filePath",
                         "in": "query"
                     }
@@ -9412,19 +9829,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.Response"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/model.Response"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/model.Response"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -9437,7 +9854,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "asset/menu/permission.yaml(permissions→role→menus|operations|csps)을 읽어 역할-메뉴 매핑을 DB에 시드합니다",
+                "description": "asset/menu/permission.yaml(permissions→role→menus|operations|csps)을 읽어 역할-메뉴 매핑을 DB에 시드합니다. additive이며 기존 매핑은 유지되고 런타임에 삭제된 매핑은 되살아납니다. yaml이 참조하지만 DB에 없는 메뉴 id는 매핑을 만들지 않고 missingPermissionMenuIDs로 보고합니다.",
                 "consumes": [
                     "application/json"
                 ],
@@ -9447,7 +9864,7 @@ const docTemplate = `{
                 "tags": [
                     "admin"
                 ],
-                "summary": "Initialize role-menu permissions from YAML",
+                "summary": "Initialize role-menu permissions from YAML (additive)",
                 "operationId": "initializeMenuPermissionsFromYAML",
                 "parameters": [
                     {
@@ -9459,9 +9876,10 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "error, message, missingPermissionMenuIDs (present only when non-empty)",
                         "schema": {
-                            "$ref": "#/definitions/model.Response"
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     },
                     "400": {
@@ -11949,7 +12367,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Add a user to a workspace",
+                "description": "Add a user to a workspace with its first workspace role. ` + "`" + `userId` + "`" + ` and a workspace role (` + "`" + `roleId` + "`" + ` or ` + "`" + `roleName` + "`" + `) are required; there is no default role.\nThe role must exist and have the workspace role type. A user who is already in the workspace is refused (change roles with POST /api/roles/assign/workspace-role).\n400: missing userId or role, invalid ID, or the role is not a workspace role. 404: workspace, user or role not found. 409: user already in workspace.",
                 "consumes": [
                     "application/json"
                 ],
@@ -11970,7 +12388,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "User Info",
+                        "description": "userId and roleId (or roleName)",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -11980,14 +12398,8 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
+                    "204": {
+                        "description": "No Content"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -12000,6 +12412,15 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -12822,7 +13243,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get temporary credentials for CSP",
+                "description": "Get temporary credentials for CSP\nAWS SAML: before issuing, the SAML provider is read with the management credential. 400 invalid_request when the provider does not exist in AWS; other check failures (e.g. AccessDenied) only log a warning.",
                 "consumes": [
                     "application/json"
                 ],
@@ -12834,7 +13255,17 @@ const docTemplate = `{
                 ],
                 "summary": "Get temporary credentials",
                 "operationId": "mciamGetTemporaryCredentials",
-                "responses": {}
+                "responses": {
+                    "400": {
+                        "description": "error, errorCode",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/workspaces/unassign/projects": {
@@ -13108,85 +13539,22 @@ const docTemplate = `{
                 "RoleTypeCSP"
             ]
         },
-        "csp.Principal": {
-            "type": "object",
-            "properties": {
-                "AWS": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "Service": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "csp.Role": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "policy": {
-                    "$ref": "#/definitions/csp.RolePolicy"
-                },
-                "tags": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "csp.RolePolicy": {
-            "type": "object",
-            "properties": {
-                "Statement": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/csp.RolePolicyStatement"
-                    }
-                },
-                "Version": {
-                    "type": "string"
-                }
-            }
-        },
-        "csp.RolePolicyStatement": {
-            "type": "object",
-            "properties": {
-                "Action": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "Effect": {
-                    "type": "string"
-                },
-                "Principal": {
-                    "$ref": "#/definitions/csp.Principal"
-                },
-                "Resource": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
         "handler.UserListRequest": {
             "type": "object",
             "properties": {
                 "enabled": {
                     "type": "boolean"
+                }
+            }
+        },
+        "handler.checkCspRolesRequest": {
+            "type": "object",
+            "properties": {
+                "cspRoles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.CreateCspRoleRequest"
+                    }
                 }
             }
         },
@@ -13511,6 +13879,27 @@ const docTemplate = `{
                 "AuthMethodSAML",
                 "AuthMethodSecretKey"
             ]
+        },
+        "model.AwsRoleView": {
+            "type": "object",
+            "properties": {
+                "arn": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "maxSessionDuration": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "trustPolicy": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            }
         },
         "model.BulkHealthCheckRequest": {
             "type": "object",
@@ -13874,6 +14263,9 @@ const docTemplate = `{
                 "frameworkService": {
                     "type": "string"
                 },
+                "icon": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -14057,6 +14449,47 @@ const docTemplate = `{
                 }
             }
         },
+        "model.CspAccountReadinessResponse": {
+            "type": "object",
+            "properties": {
+                "accountId": {
+                    "type": "integer"
+                },
+                "accountName": {
+                    "type": "string"
+                },
+                "canIssue": {
+                    "description": "CanIssue 실제 assume 에 성공하고 매핑도 있는 CSP Role 이 1개 이상. 확인하지 않았으면 null",
+                    "type": "boolean"
+                },
+                "canMapRoles": {
+                    "description": "CanMapRoles 설정이 끝난 CSP Role 이 1개 이상 있어 플랫폼 역할과 매핑할 수 있음",
+                    "type": "boolean"
+                },
+                "checkedAt": {
+                    "type": "string"
+                },
+                "cspRoles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.CspRoleReadiness"
+                    }
+                },
+                "cspType": {
+                    "type": "string"
+                },
+                "liveChecks": {
+                    "description": "LiveChecks CSP 실호출(④·⑦)을 수행할 권한이 있었는지 (PlatformAdmin)",
+                    "type": "boolean"
+                },
+                "stages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ReadinessStage"
+                    }
+                }
+            }
+        },
         "model.CspAccountValidationResponse": {
             "type": "object",
             "properties": {
@@ -14097,6 +14530,14 @@ const docTemplate = `{
                 },
                 "error": {
                     "type": "string"
+                },
+                "trust_policy": {
+                    "description": "TrustPolicy AWS OIDC·SAML Role 의 신뢰 정책 판정 (IAM-TECH-045 M2, 진단 API 와 같은 판정)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.TrustPolicyCheck"
+                        }
+                    ]
                 },
                 "valid": {
                     "type": "boolean"
@@ -14230,6 +14671,59 @@ const docTemplate = `{
                 }
             }
         },
+        "model.CspPolicyChangeResult": {
+            "type": "object",
+            "properties": {
+                "bindingResults": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.PolicyBindingResult"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "csp_account": {
+                    "$ref": "#/definitions/model.CspAccount"
+                },
+                "csp_account_id": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "policy_arn": {
+                    "type": "string"
+                },
+                "policy_doc": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "policy_type": {
+                    "description": "inline, managed, custom",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.PolicyType"
+                        }
+                    ]
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "model.CspPolicyFilter": {
             "type": "object",
             "properties": {
@@ -14297,6 +14791,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "origin": {
+                    "description": "출처 (IAM-BUG-057): created = IAM 이 CSP 에 만든 Role, registered = CSP 에 이미 있던 Role 을 등록.\n빈 값(이전 레코드)은 registered 와 같이 다룬다. 삭제 시 created 만 CSP Role 까지 지운다.",
+                    "type": "string"
+                },
                 "path": {
                     "type": "string"
                 },
@@ -14322,6 +14820,157 @@ const docTemplate = `{
                     }
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.CspRoleDeleteResult": {
+            "type": "object",
+            "properties": {
+                "bindingResults": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.PolicyBindingResult"
+                    }
+                },
+                "cspRoleId": {
+                    "type": "integer"
+                },
+                "result": {
+                    "description": "detach_failed",
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "model.CspRolePolicy": {
+            "type": "object",
+            "properties": {
+                "applied_at": {
+                    "type": "string"
+                },
+                "aws_status": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "csp_account": {
+                    "$ref": "#/definitions/model.CspAccount"
+                },
+                "csp_account_id": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "policy_arn": {
+                    "type": "string"
+                },
+                "policy_doc": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "policy_type": {
+                    "description": "inline, managed, custom",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.PolicyType"
+                        }
+                    ]
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.CspRoleReadiness": {
+            "type": "object",
+            "properties": {
+                "authMethod": {
+                    "type": "string"
+                },
+                "cspIdpConfigId": {
+                    "type": "integer"
+                },
+                "cspRoleId": {
+                    "type": "integer"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "issueDetail": {
+                    "type": "string"
+                },
+                "issueStatus": {
+                    "description": "⑦",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.ReadinessStatus"
+                        }
+                    ]
+                },
+                "linkage": {
+                    "type": "string"
+                },
+                "mappingCount": {
+                    "description": "⑥ 매핑된 플랫폼 역할 수",
+                    "type": "integer"
+                },
+                "mappingStatus": {
+                    "description": "⑥",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.ReadinessStatus"
+                        }
+                    ]
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "⑤ 역할 설정",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.ReadinessStatus"
+                        }
+                    ]
+                },
+                "trustPolicy": {
+                    "description": "TrustPolicy ⑦ 참고 정보: AWS 신뢰 정책 판정 (checkIssue·PlatformAdmin 일 때 AWS Role 만). ⑦ 판정은 실제 assume 결과로만 정한다",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.CspRoleTrustReadiness"
+                        }
+                    ]
+                }
+            }
+        },
+        "model.CspRoleTrustReadiness": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "nextAction": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "ok | missing | mismatch | not_found | error",
                     "type": "string"
                 }
             }
@@ -14765,6 +15414,9 @@ const docTemplate = `{
                 "frameworkService": {
                     "type": "string"
                 },
+                "icon": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -14805,6 +15457,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "frameworkService": {
+                    "type": "string"
+                },
+                "icon": {
                     "type": "string"
                 },
                 "id": {
@@ -14955,6 +15610,38 @@ const docTemplate = `{
                 }
             }
         },
+        "model.PolicyBindingResult": {
+            "type": "object",
+            "properties": {
+                "awsStatus": {
+                    "description": "남은 매핑 행의 상태 (detached 면 비어 있음)",
+                    "type": "string"
+                },
+                "cspPolicyId": {
+                    "type": "integer"
+                },
+                "cspRoleId": {
+                    "type": "integer"
+                },
+                "errorCode": {
+                    "description": "failed·detach_failed: csp_error",
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "result": {
+                    "description": "applied | failed | detached | detach_failed",
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "model.PolicyType": {
             "type": "string",
             "enum": [
@@ -14963,9 +15650,9 @@ const docTemplate = `{
                 "custom"
             ],
             "x-enum-comments": {
-                "PolicyTypeCustom": "사용자 정의 정책",
-                "PolicyTypeInline": "인라인 정책 (역할에 직접 포함)",
-                "PolicyTypeManaged": "관리형 정책 (독립 정책)"
+                "PolicyTypeCustom": "고객 관리형 정책(계정의 독립 정책): 여러 Role 공유, IAM 이 생성·수정·삭제 (mciam-* 만)",
+                "PolicyTypeInline": "인라인 정책: 문서를 Role 1개 안에 사본으로 저장 (Role 1개 전용)",
+                "PolicyTypeManaged": "AWS 관리형 정책(arn:aws:iam::aws:policy/...): 연결·해제만, 문서 수정 불가"
             },
             "x-enum-varnames": [
                 "PolicyTypeInline",
@@ -15148,6 +15835,57 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "model.ReadinessStage": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "guideAnchor": {
+                    "description": "CSP-Temporary-Credential-Guide-ko 절 번호",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nextAction": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/model.ReadinessStatus"
+                }
+            }
+        },
+        "model.ReadinessStatus": {
+            "type": "string",
+            "enum": [
+                "ok",
+                "failed",
+                "pending",
+                "skipped",
+                "not_applicable"
+            ],
+            "x-enum-comments": {
+                "ReadinessFailed": "확인했으나 미충족",
+                "ReadinessNotApplicable": "이 CSP·인증방식에는 해당 없음(미지원 포함)",
+                "ReadinessOK": "충족",
+                "ReadinessPending": "아직 진행 전(등록·매핑 없음, 또는 확인 요청 안 함)",
+                "ReadinessSkipped": "앞 단계 실패나 권한 부족으로 확인하지 않음"
+            },
+            "x-enum-varnames": [
+                "ReadinessOK",
+                "ReadinessFailed",
+                "ReadinessPending",
+                "ReadinessSkipped",
+                "ReadinessNotApplicable"
+            ]
         },
         "model.RemediationGuide": {
             "type": "object",
@@ -15577,6 +16315,204 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.TrustPolicyBulkItem": {
+            "type": "object",
+            "properties": {
+                "cspRoleId": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "roleName": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "check: 판정 / sync: unchanged | applied | would_change | registered_role | protected | not_found | invalid_request | error",
+                    "type": "string"
+                },
+                "sync": {
+                    "$ref": "#/definitions/model.TrustPolicySyncResult"
+                },
+                "trustPolicy": {
+                    "$ref": "#/definitions/model.TrustPolicyCheck"
+                }
+            }
+        },
+        "model.TrustPolicyBulkResult": {
+            "type": "object",
+            "properties": {
+                "authMethod": {
+                    "type": "string"
+                },
+                "cspIdpConfigId": {
+                    "type": "integer"
+                },
+                "dryRun": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.TrustPolicyBulkItem"
+                    }
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "model.TrustPolicyChange": {
+            "type": "object",
+            "properties": {
+                "authMethod": {
+                    "type": "string"
+                },
+                "change": {
+                    "description": "statement_added | action_added | aud_set | aud_removed",
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.TrustPolicyCheck": {
+            "type": "object",
+            "properties": {
+                "extra": {
+                    "description": "IAM 이 쓰지 않은 statement 의 principal 요약",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "roleName": {
+                    "type": "string"
+                },
+                "statements": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.TrustStatementCheck"
+                    }
+                },
+                "status": {
+                    "description": "ok | missing | mismatch | not_found | error",
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "model.TrustPolicySyncRequest": {
+            "type": "object",
+            "properties": {
+                "allowRegistered": {
+                    "description": "registered(빈 origin 포함) Role 도 바꾼다",
+                    "type": "boolean"
+                },
+                "dryRun": {
+                    "description": "기본 true (쓰지 않고 변경안만)",
+                    "type": "boolean"
+                }
+            }
+        },
+        "model.TrustPolicySyncResult": {
+            "type": "object",
+            "properties": {
+                "after": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "applied": {
+                    "type": "boolean"
+                },
+                "before": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "changes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.TrustPolicyChange"
+                    }
+                },
+                "cspRoleId": {
+                    "type": "integer"
+                },
+                "dryRun": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "roleName": {
+                    "type": "string"
+                },
+                "verdict": {
+                    "description": "동기화 전 판정 (ok | missing | mismatch)",
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "model.TrustStatementCheck": {
+            "type": "object",
+            "properties": {
+                "actualActions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "actualAud": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "authMethod": {
+                    "type": "string"
+                },
+                "expectedAction": {
+                    "type": "string"
+                },
+                "expectedAud": {
+                    "type": "string"
+                },
+                "expectedAudKey": {
+                    "type": "string"
+                },
+                "expectedFederated": {
+                    "type": "string"
+                },
+                "idpConfigId": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "ok | missing | mismatch | error",
                     "type": "string"
                 }
             }

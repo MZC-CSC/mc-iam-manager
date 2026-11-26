@@ -10427,7 +10427,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: Add a user to a workspace
+      description: |-
+        Add a user to a workspace with its first workspace role. `userId` and a workspace role (`roleId` or `roleName`) are required; there is no default role.
+        The role must exist and have the workspace role type. A user who is already in the workspace is refused (change roles with POST /api/roles/assign/workspace-role).
+        400: missing userId or role, invalid ID, or the role is not a workspace role. 404: workspace, user or role not found. 409: user already in workspace.
       operationId: addUserToWorkspace
       parameters:
       - description: Workspace ID
@@ -10435,7 +10438,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: User Info
+      - description: userId and roleId (or roleName)
         in: body
         name: request
         required: true
@@ -10444,12 +10447,8 @@ paths:
       produces:
       - application/json
       responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
+        "204":
+          description: No Content
         "400":
           description: Bad Request
           schema:
@@ -10458,6 +10457,12 @@ paths:
             type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
           schema:
             additionalProperties:
               type: string

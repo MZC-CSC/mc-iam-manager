@@ -208,71 +208,88 @@ func (s *WorkspaceService) AssignWorkspaceRole(userID, workspaceID, roleID uint)
 		return fmt.Errorf("워크스페이스를 찾을 수 없습니다")
 	}
 
-	// 역할 존재 여부 확인
-	role, err := s.roleRepo.FindRoleByRoleID(roleID, constants.RoleTypeWorkspace)
-	if err != nil {
-		return fmt.Errorf("역할을 찾을 수 없습니다: %w", err)
-	}
-	if role == nil {
-		return fmt.Errorf("역할을 찾을 수 없습니다")
-	}
-
-	// 워크스페이스 역할 타입 검증
-	roleSub, err := s.roleRepo.FindRoleSubByRoleIDAndType(roleID, constants.RoleTypeWorkspace)
-	if err != nil {
-		return fmt.Errorf("워크스페이스 역할이 아닙니다")
-	}
-	if roleSub == nil {
-		return fmt.Errorf("워크스페이스 역할이 아닙니다")
+	// 역할 존재·워크스페이스 유형 확인
+	if _, err := s.validateWorkspaceRole(roleID); err != nil {
+		return err
 	}
 
 	// 역할 할당
 	return s.roleRepo.AssignWorkspaceRole(userID, workspaceID, roleID)
 }
 
-// AddUserToWorkspace 워크스페이스에 사용자를 추가합니다.
-func (s *WorkspaceService) AddUserToWorkspace(workspaceID, userID uint) error {
-	// 워크스페이스 존재 여부 확인
-	_, err := s.workspaceRepo.FindWorkspaceByID(workspaceID)
+// 멤버 추가 오류 (핸들러가 HTTP 상태로 구분한다)
+var (
+	ErrWorkspaceRoleRequired  = errors.New("a workspace role (roleId or roleName) is required")
+	ErrRoleNotFound           = errors.New("role not found")
+	ErrNotWorkspaceRole       = errors.New("role is not a workspace role")
+	ErrUserAlreadyInWorkspace = errors.New("user already in workspace")
+)
+
+// validateWorkspaceRole 역할이 있고 sub 유형 workspace 인지 확인한다 (AssignWorkspaceRole·AddUserToWorkspace 공용)
+func (s *WorkspaceService) validateWorkspaceRole(roleID uint) (*model.RoleMaster, error) {
+	role, err := s.roleRepo.FindRoleByRoleID(roleID, "")
 	if err != nil {
+		return nil, fmt.Errorf("failed to find role %d: %w", roleID, err)
+	}
+	if role == nil {
+		return nil, fmt.Errorf("%w: id=%d", ErrRoleNotFound, roleID)
+	}
+	roleSub, err := s.roleRepo.FindRoleSubByRoleIDAndType(roleID, constants.RoleTypeWorkspace)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("failed to check role type of %s: %w", role.Name, err)
+	}
+	if roleSub == nil {
+		return nil, fmt.Errorf("%w: %s", ErrNotWorkspaceRole, role.Name)
+	}
+	return role, nil
+}
+
+// AddUserToWorkspace 워크스페이스에 사용자를 추가한다 (멤버 추가 = 첫 워크스페이스 역할 부여).
+// 역할은 roleID 또는 roleName 으로 반드시 지정한다(기본 역할 없음). 이미 소속된 사용자는 거부한다.
+func (s *WorkspaceService) AddUserToWorkspace(workspaceID, userID, roleID uint, roleName string) error {
+	workspace, err := s.workspaceRepo.FindWorkspaceByID(workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to find workspace %d: %w", workspaceID, err)
+	}
+	if workspace == nil {
+		return fmt.Errorf("%w: id=%d", ErrWorkspaceNotFound, workspaceID)
+	}
+
+	user, err := s.userRepo.FindUserByID(userID)
+	if err != nil || user == nil {
+		return fmt.Errorf("%w: id=%d", ErrUserNotFound, userID)
+	}
+
+	if roleID == 0 {
+		if roleName == "" {
+			return ErrWorkspaceRoleRequired
+		}
+		named, err := s.roleRepo.FindRoleByRoleName(roleName, "")
+		if err != nil {
+			return fmt.Errorf("failed to find role %s: %w", roleName, err)
+		}
+		if named == nil {
+			return fmt.Errorf("%w: %s", ErrRoleNotFound, roleName)
+		}
+		roleID = named.ID
+	}
+	if _, err := s.validateWorkspaceRole(roleID); err != nil {
 		return err
 	}
 
-	// 사용자 존재 여부 확인
-	user, err := s.userRepo.FindUserByID(userID)
-	if err != nil {
-		return errors.New("user not found")
-	}
-	if user == nil {
-		return errors.New("user not found")
-	}
-
-	// 이미 워크스페이스에 속해있는지 확인
 	isInWorkspace, err := s.roleRepo.CheckUserInWorkspace(workspaceID, userID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to check workspace membership: %w", err)
 	}
 	if isInWorkspace {
-		return errors.New("user already in workspace")
+		return fmt.Errorf("%w: user %d, workspace %d (change roles with /api/roles/assign/workspace-role)", ErrUserAlreadyInWorkspace, userID, workspaceID)
 	}
 
-	// 기본 워크스페이스 역할 조회
-	defaultRole, err := s.roleRepo.FindDefaultWorkspaceRole()
-	if err != nil {
-		return err
-	}
-
-	// 사용자를 워크스페이스에 추가
-	uwr := model.UserWorkspaceRole{
+	return s.userRepo.CreateUserWorkspaceRole(&model.UserWorkspaceRole{
 		UserID:      userID,
 		WorkspaceID: workspaceID,
-		RoleID:      defaultRole.ID,
-	}
-	if err := s.userRepo.CreateUserWorkspaceRole(&uwr); err != nil {
-		return err
-	}
-
-	return nil
+		RoleID:      roleID,
+	})
 }
 
 // RemoveUserFromWorkspace 워크스페이스에서 사용자를 제거합니다.

@@ -12367,7 +12367,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Add a user to a workspace",
+                "description": "Add a user to a workspace with its first workspace role. ` + "`" + `userId` + "`" + ` and a workspace role (` + "`" + `roleId` + "`" + ` or ` + "`" + `roleName` + "`" + `) are required; there is no default role.\nThe role must exist and have the workspace role type. A user who is already in the workspace is refused (change roles with POST /api/roles/assign/workspace-role).\n400: missing userId or role, invalid ID, or the role is not a workspace role. 404: workspace, user or role not found. 409: user already in workspace.",
                 "consumes": [
                     "application/json"
                 ],
@@ -12388,7 +12388,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "User Info",
+                        "description": "userId and roleId (or roleName)",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -12398,14 +12398,8 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
+                    "204": {
+                        "description": "No Content"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -12418,6 +12412,15 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {

@@ -588,15 +588,18 @@ func (h *WorkspaceHandler) ListWorkspaceRoles(c echo.Context) error {
 
 // AddUserToWorkspace godoc
 // @Summary Add user to workspace
-// @Description Add a user to a workspace
+// @Description Add a user to a workspace with its first workspace role. `userId` and a workspace role (`roleId` or `roleName`) are required; there is no default role.
+// @Description The role must exist and have the workspace role type. A user who is already in the workspace is refused (change roles with POST /api/roles/assign/workspace-role).
+// @Description 400: missing userId or role, invalid ID, or the role is not a workspace role. 404: workspace, user or role not found. 409: user already in workspace.
 // @Tags workspaces
 // @Accept json
 // @Produce json
 // @Param id path string true "Workspace ID"
-// @Param request body model.AssignRoleRequest true "User Info"
-// @Success 200 {object} map[string]string
+// @Param request body model.AssignRoleRequest true "userId and roleId (or roleName)"
+// @Success 204 "No Content"
 // @Failure 400 {object} map[string]string
 // @Failure 404 {object} map[string]string
+// @Failure 409 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/workspaces/id/{id}/users [post]
@@ -631,9 +634,25 @@ func (h *WorkspaceHandler) AddUserToWorkspace(c echo.Context) error {
 		}
 	}
 
-	if err := h.workspaceService.AddUserToWorkspace(workspaceID, userID); err != nil {
-		if err.Error() == "workspace not found" || err.Error() == "user not found" {
+	// 역할 필수 (기본 역할 없음)
+	var roleID uint
+	if req.RoleID != "" {
+		roleID, err = util.StringToUint(req.RoleID)
+		if err != nil || roleID == 0 {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid role ID format"})
+		}
+	} else if req.RoleName == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "roleId or roleName is required: specify a role with the workspace role type"})
+	}
+
+	if err := h.workspaceService.AddUserToWorkspace(workspaceID, userID, roleID, req.RoleName); err != nil {
+		switch {
+		case errors.Is(err, service.ErrWorkspaceNotFound), errors.Is(err, service.ErrUserNotFound), errors.Is(err, service.ErrRoleNotFound):
 			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		case errors.Is(err, service.ErrUserAlreadyInWorkspace):
+			return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+		case errors.Is(err, service.ErrNotWorkspaceRole), errors.Is(err, service.ErrWorkspaceRoleRequired):
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to add user: %v", err)})
 	}
