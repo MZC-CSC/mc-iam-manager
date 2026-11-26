@@ -197,44 +197,27 @@ func (s *WorkspaceService) RemoveProjectFromWorkspace(workspaceID, projectID uin
 	return nil
 }
 
-// AssignRole 워크스페이스에 사용자 역할 할당
-func (s *WorkspaceService) AssignWorkspaceRole(userID, workspaceID, roleID uint) error {
-	// 워크스페이스 존재 여부 확인
-	workspace, err := s.workspaceRepo.FindWorkspaceByID(workspaceID)
-	if err != nil {
-		return fmt.Errorf("워크스페이스를 찾을 수 없습니다: %w", err)
-	}
-	if workspace == nil {
-		return fmt.Errorf("워크스페이스를 찾을 수 없습니다")
-	}
-
-	// 역할 존재·워크스페이스 유형 확인
-	if _, err := s.validateWorkspaceRole(roleID); err != nil {
-		return err
-	}
-
-	// 역할 할당
-	return s.roleRepo.AssignWorkspaceRole(userID, workspaceID, roleID)
-}
-
 // 멤버 추가 오류 (핸들러가 HTTP 상태로 구분한다)
 var (
 	ErrWorkspaceRoleRequired  = errors.New("a workspace role (roleId or roleName) is required")
 	ErrRoleNotFound           = errors.New("role not found")
 	ErrNotWorkspaceRole       = errors.New("role is not a workspace role")
 	ErrUserAlreadyInWorkspace = errors.New("user already in workspace")
+	// ErrWorkspaceRoleAlreadyAssigned 같은 (사용자, 워크스페이스, 역할) 이 이미 있음 (역할 할당 API)
+	ErrWorkspaceRoleAlreadyAssigned = errors.New("workspace role already assigned to user")
 )
 
-// validateWorkspaceRole 역할이 있고 sub 유형 workspace 인지 확인한다 (AssignWorkspaceRole·AddUserToWorkspace 공용)
-func (s *WorkspaceService) validateWorkspaceRole(roleID uint) (*model.RoleMaster, error) {
-	role, err := s.roleRepo.FindRoleByRoleID(roleID, "")
+// validateWorkspaceRole 역할이 있고 sub 유형 workspace 인지 확인한다
+// (멤버 추가 WorkspaceService.AddUserToWorkspace · 역할 할당 RoleService.AssignWorkspaceRole 공용)
+func validateWorkspaceRole(roleRepo *repository.RoleRepository, roleID uint) (*model.RoleMaster, error) {
+	role, err := roleRepo.FindRoleByRoleID(roleID, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to find role %d: %w", roleID, err)
 	}
 	if role == nil {
 		return nil, fmt.Errorf("%w: id=%d", ErrRoleNotFound, roleID)
 	}
-	roleSub, err := s.roleRepo.FindRoleSubByRoleIDAndType(roleID, constants.RoleTypeWorkspace)
+	roleSub, err := roleRepo.FindRoleSubByRoleIDAndType(roleID, constants.RoleTypeWorkspace)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("failed to check role type of %s: %w", role.Name, err)
 	}
@@ -273,7 +256,7 @@ func (s *WorkspaceService) AddUserToWorkspace(workspaceID, userID, roleID uint, 
 		}
 		roleID = named.ID
 	}
-	if _, err := s.validateWorkspaceRole(roleID); err != nil {
+	if _, err := validateWorkspaceRole(s.roleRepo, roleID); err != nil {
 		return err
 	}
 

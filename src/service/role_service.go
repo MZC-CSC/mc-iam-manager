@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/m-cmp/mc-iam-manager/constants"
@@ -12,17 +13,21 @@ import (
 
 // RoleService 역할 관리 서비스
 type RoleService struct {
-	db             *gorm.DB
-	roleRepository *repository.RoleRepository
-	menuRepository *repository.MenuRepository
+	db                  *gorm.DB
+	roleRepository      *repository.RoleRepository
+	menuRepository      *repository.MenuRepository
+	userRepository      *repository.UserRepository
+	workspaceRepository *repository.WorkspaceRepository
 }
 
 // NewRoleService 새 RoleService 인스턴스 생성
 func NewRoleService(db *gorm.DB) *RoleService {
 	return &RoleService{
-		db:             db,
-		roleRepository: repository.NewRoleRepository(db),
-		menuRepository: repository.NewMenuRepository(db),
+		db:                  db,
+		roleRepository:      repository.NewRoleRepository(db),
+		menuRepository:      repository.NewMenuRepository(db),
+		userRepository:      repository.NewUserRepository(db),
+		workspaceRepository: repository.NewWorkspaceRepository(db),
 	}
 }
 
@@ -266,30 +271,37 @@ func (s *RoleService) AssignPlatformRole(userID, roleID uint) error {
 	return s.roleRepository.AssignPlatformRole(userID, roleID)
 }
 
-// AssignWorkspaceRole 워크스페이스 역할 할당
+// AssignWorkspaceRole 워크스페이스 역할 할당. 이미 소속된 사용자에게 다른 역할을 더 주는 것은 허용한다.
+// 오류는 핸들러가 HTTP 상태로 구분한다: ErrWorkspaceNotFound·ErrUserNotFound·ErrRoleNotFound(404),
+// ErrNotWorkspaceRole(400), ErrWorkspaceRoleAlreadyAssigned(409).
 func (s *RoleService) AssignWorkspaceRole(userID, workspaceID, roleID uint) error {
-	// 1. 역할이 존재하는지 확인
-	role, err := s.roleRepository.FindRoleByRoleID(roleID, constants.RoleTypeWorkspace)
+	workspace, err := s.workspaceRepository.FindWorkspaceByID(workspaceID)
 	if err != nil {
-		return fmt.Errorf("역할 조회 실패: %w", err)
+		return fmt.Errorf("failed to find workspace %d: %w", workspaceID, err)
 	}
-	if role == nil {
-		return fmt.Errorf("역할을 찾을 수 없습니다")
+	if workspace == nil {
+		return fmt.Errorf("%w: id=%d", ErrWorkspaceNotFound, workspaceID)
 	}
 
-	// 2. 역할이 workspace 타입인지 확인
-	isWorkspaceRole := false
-	for _, sub := range role.RoleSubs {
-		if sub.RoleType == constants.RoleTypeWorkspace {
-			isWorkspaceRole = true
-			break
+	if _, err := s.userRepository.FindUserByID(userID); err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return fmt.Errorf("%w: id=%d", ErrUserNotFound, userID)
 		}
-	}
-	if !isWorkspaceRole {
-		return fmt.Errorf("워크스페이스 역할이 아닙니다")
+		return fmt.Errorf("failed to find user %d: %w", userID, err)
 	}
 
-	// 3. 역할 할당
+	if _, err := validateWorkspaceRole(s.roleRepository, roleID); err != nil {
+		return err
+	}
+
+	exists, err := s.roleRepository.HasUserWorkspaceRole(userID, workspaceID, roleID)
+	if err != nil {
+		return fmt.Errorf("failed to check workspace role assignment: %w", err)
+	}
+	if exists {
+		return fmt.Errorf("%w: user %d, workspace %d, role %d", ErrWorkspaceRoleAlreadyAssigned, userID, workspaceID, roleID)
+	}
+
 	return s.roleRepository.AssignWorkspaceRole(userID, workspaceID, roleID)
 }
 

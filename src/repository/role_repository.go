@@ -340,6 +340,18 @@ func (r *RoleRepository) AssignWorkspaceRole(userID, workspaceID, roleID uint) e
 	return r.db.Create(&userWorkspaceRole).Error
 }
 
+// HasUserWorkspaceRole 같은 (사용자, 워크스페이스, 역할) 할당이 있는지 확인
+func (r *RoleRepository) HasUserWorkspaceRole(userID, workspaceID, roleID uint) (bool, error) {
+	var count int64
+	err := r.db.Model(&model.UserWorkspaceRole{}).
+		Where("user_id = ? AND workspace_id = ? AND role_id = ?", userID, workspaceID, roleID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // RemoveWorkspaceRole 워크스페이스 역할 제거
 func (r *RoleRepository) RemoveWorkspaceRole(userID, workspaceID, roleID uint) error {
 	return r.db.Where("user_id = ? AND workspace_id = ? AND role_id = ?", userID, workspaceID, roleID).

@@ -6931,7 +6931,25 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "요청 형식 오류, workspace 유형이 아닌 역할",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "없는 사용자·워크스페이스·역할",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "같은 역할이 이미 할당됨",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8089,6 +8107,24 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "없는 사용자·워크스페이스·역할",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "같은 워크스페이스 역할이 이미 할당됨",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {

@@ -6949,7 +6949,19 @@ paths:
               type: string
             type: object
         "400":
-          description: Bad Request
+          description: 요청 형식 오류, workspace 유형이 아닌 역할
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: 없는 사용자·워크스페이스·역할
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: 같은 역할이 이미 할당됨
           schema:
             additionalProperties:
               type: string
@@ -7717,6 +7729,18 @@ paths:
             type: object
         "400":
           description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: 없는 사용자·워크스페이스·역할
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: 같은 워크스페이스 역할이 이미 할당됨
           schema:
             additionalProperties:
               type: string

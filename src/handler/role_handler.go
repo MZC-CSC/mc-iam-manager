@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -419,6 +420,8 @@ func (h *RoleHandler) DeleteRole(c echo.Context) error {
 // @Param request body model.AssignRoleRequest true "Role Assignment Info"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string "없는 사용자·워크스페이스·역할"
+// @Failure 409 {object} map[string]string "같은 워크스페이스 역할이 이미 할당됨"
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/roles/id/{roleId}/assign [post]
@@ -531,6 +534,9 @@ func (h *RoleHandler) AssignRole(c echo.Context) error {
 		if err := h.roleService.AssignWorkspaceRole(userID, workspaceID, roleID); err != nil {
 			log.Printf("Failed to assign workspace role - userID: %d, workspaceID: %d, roleID: %s, error: %v",
 				userID, workspaceID, req.RoleID, err)
+			if code, ok := workspaceRoleAssignErrorStatus(err); ok {
+				return c.JSON(code, map[string]string{"error": err.Error()})
+			}
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to assign workspace role: %v", err)})
 		}
 	}
@@ -1902,7 +1908,9 @@ func (h *RoleHandler) RemovePlatformRole(c echo.Context) error {
 // @Produce json
 // @Param request body model.AssignWorkspaceRoleRequest true "Workspace Role Assignment Info"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} map[string]string
+// @Failure 400 {object} map[string]string "요청 형식 오류, workspace 유형이 아닌 역할"
+// @Failure 404 {object} map[string]string "없는 사용자·워크스페이스·역할"
+// @Failure 409 {object} map[string]string "같은 역할이 이미 할당됨"
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/roles/assign/workspace-role [post]
@@ -1979,6 +1987,9 @@ func (h *RoleHandler) AssignWorkspaceRole(c echo.Context) error {
 	// 역할 할당
 	err := h.roleService.AssignWorkspaceRole(userID, workspaceID, roleID)
 	if err != nil {
+		if code, ok := workspaceRoleAssignErrorStatus(err); ok {
+			return c.JSON(code, map[string]string{"error": err.Error()})
+		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 할당 실패: %v", err)})
 	}
 
@@ -2511,4 +2522,17 @@ func (h *RoleHandler) GetRoleMasterMappings(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, mappings)
+}
+
+// workspaceRoleAssignErrorStatus RoleService.AssignWorkspaceRole 오류를 HTTP 상태로 구분한다 (구분 못 하면 false → 500)
+func workspaceRoleAssignErrorStatus(err error) (int, bool) {
+	switch {
+	case errors.Is(err, service.ErrWorkspaceNotFound), errors.Is(err, service.ErrUserNotFound), errors.Is(err, service.ErrRoleNotFound):
+		return http.StatusNotFound, true
+	case errors.Is(err, service.ErrNotWorkspaceRole):
+		return http.StatusBadRequest, true
+	case errors.Is(err, service.ErrWorkspaceRoleAlreadyAssigned):
+		return http.StatusConflict, true
+	}
+	return 0, false
 }
