@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"text/template"
 
@@ -198,18 +197,16 @@ func (s *CspRoleService) ensureKeycloakClientForCspRole(req *model.CreateCspRole
 	// AuthMethod에 따라 SAML/OIDC 클라이언트 확인
 	switch req.AuthMethod {
 	case constants.AuthMethodSAML:
-		// CSP별 SAML 클라이언트 ID 환경변수
-		samlClientID := ""
-		switch req.CspType {
-		case "aws":
-			samlClientID = os.Getenv("SAML_CLIENT_ID_AWS")
-		case "alibaba":
-			samlClientID = os.Getenv("SAML_CLIENT_ID_ALIBABA")
-		}
-		if samlClientID != "" {
-			if _, err := s.keycloakService.CheckSAMLClientConfig(ctx, samlClientID); err != nil {
-				return fmt.Errorf("SAML client check failed for %s: %w", req.CspType, err)
+		// SAML 클라이언트 ID 는 CspRole 의 extendedConfig.saml_client_id 에서만 읽는다 (env 대체 없음)
+		samlClientID, _ := req.ExtendedConfig["saml_client_id"].(string)
+		if samlClientID == "" {
+			if req.CspType == "aws" || req.CspType == "alibaba" {
+				return fmt.Errorf("extendedConfig.saml_client_id is not set; issuing SAML credentials will fail until it is set (PUT /api/roles/csp/id/%d)", role.ID)
 			}
+			return nil
+		}
+		if _, err := s.keycloakService.CheckSAMLClientConfig(ctx, samlClientID); err != nil {
+			return fmt.Errorf("SAML client check failed for %s: %w", req.CspType, err)
 		}
 	case constants.AuthMethodOIDC:
 		// OIDC 클라이언트는 공용 mciam 클라이언트를 사용하므로 별도 확인 불필요

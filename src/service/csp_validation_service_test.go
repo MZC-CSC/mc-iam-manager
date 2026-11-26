@@ -109,6 +109,9 @@ func buildValMapping(authMethod string, idpArn, roleArn string) *model.RoleMaste
 		IdpIdentifier: idpArn,
 		IamIdentifier: roleArn,
 	}
+	if authMethod == "SAML" {
+		cspRole.ExtendedConfig = map[string]interface{}{"saml_client_id": "urn:amazon:webservices"}
+	}
 	return &model.RoleMasterCspRoleMapping{
 		RoleID:    1,
 		CspRoleID: 1,
