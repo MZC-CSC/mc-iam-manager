@@ -85,10 +85,11 @@ Found by searching `os.Getenv` under [`src/`](https://github.com/m-cmp/mc-iam-ma
 
 | Variable | Default | Required | Purpose | Read in |
 |---|---|---|---|---|
-| `AWS_REGION` | `ap-northeast-2` (where a default applies) | Optional | Region for AWS STS and credential checks | [`src/service/aws_credential_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/aws_credential_service.go), [`src/service/csp_validation_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_validation_service.go) |
 | `AWS_STS_ENDPOINT` | `https://sts.amazonaws.com` | Optional | STS endpoint of the `/api/csp/iam` client | [`src/csp/aws/iam.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/csp/aws/iam.go) |
 | `SAML_CLIENT_ID_AWS` | none | Optional | Example value in the "saml_client_id missing" error, a warning-only Keycloak client check at SAML role creation, and a fallback in the validate API. Issuance uses the CSP role `extendedConfig.saml_client_id` (`urn:amazon:webservices`) | [`src/service/csp_role_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_role_service.go), [`src/service/csp_credential_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_credential_service.go), [`src/service/csp_validation_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_validation_service.go) |
 | `SAML_CLIENT_ID_ALIBABA` | none | Optional | Same as above for Alibaba Cloud | [`src/service/csp_role_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_role_service.go), [`src/service/csp_credential_service.go`](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_credential_service.go) |
+
+The server does not read `AWS_REGION`. The region for temporary credentials and AWS checks comes from the request or the CSP account `account_info.region`; see [CSP Integration, Region](CSP-Integration#region). With mc-admin-cli, `MC_IAM_MANAGER_AWS_DEFAULT_REGION` (default `ap-northeast-2`) in its `.env` sets the region of the AWS default account only when the account is created at initial setup.
 
 ### Health check overrides
 

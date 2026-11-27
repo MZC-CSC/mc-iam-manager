@@ -21,7 +21,9 @@ Key sources: [src/service/csp_credential_service.go](https://github.com/m-cmp/mc
 | `CspPolicy`, `CspRolePolicyMapping` | Policies attached to CSP roles | `policy_type` (`inline`, `managed`, `custom`), `policy_arn`, `policy_doc` |
 | `TempCredential` (`mcmp_temp_credentials`) | Cached AWS credentials used by the server itself when creating AWS IAM roles | `provider`, `auth_type`, keys, `expires_at` |
 
-`account_info` keys validated on create ([src/service/csp_account_service.go](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_account_service.go) `validateAccountInfo`): AWS / Alibaba `account_id`; GCP `project_id`; Tencent `app_id`; Azure `subscription_id` and `tenant_id`; optional `region`. IBM, NCP, NHN, KT, OpenStack are not validated yet.
+`account_info` keys validated on create ([src/service/csp_account_service.go](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_account_service.go) `validateAccountInfo`): AWS / Alibaba `account_id`; GCP `project_id`; Tencent `app_id`; Azure `subscription_id` and `tenant_id`. IBM, NCP, NHN, KT, OpenStack are not validated yet.
+
+`account_info.region` is the account's default region for temporary credentials (see [Region](#region)). It is required for Tencent (`400 region_required`) and optional for the others; when present its format is checked (`400 invalid_region`). On `PUT /api/csp-accounts/id/:accountId`, an `account_info` without the `region` key keeps the stored region, and `"region": ""` removes it (not allowed for Tencent). Other `account_info` keys are replaced as a whole.
 
 `config` keys read by the code ([src/model/csp_idp_config.go](https://github.com/m-cmp/mc-iam-manager/blob/main/src/model/csp_idp_config.go) and the credential dispatcher):
 
@@ -93,7 +95,23 @@ Details:
 - For AWS and Alibaba SAML the CSP role must have `extended_config.saml_client_id` (the Keycloak SAML client id, e.g. `urn:amazon:webservices`); otherwise the call fails (the error message quotes `SAML_CLIENT_ID_AWS` / `SAML_CLIENT_ID_ALIBABA` only as an example value). GCP and Tencent SAML fall back to `idp_identifier` as the audience.
 - AWS SAML pre-checks before STS: `saml_client_id` present, Keycloak SAML client present, and the SAML provider exists in AWS (checked with the management credentials). If the provider that will be used (the CSP role `idp_identifier`) does not exist, the request fails with **400 `invalid_request`** and STS is not called; other lookup failures (for example AccessDenied) only log a warning.
 - Tencent uses the provider **name** (the part after the last `/` of `idp_identifier`) as `ProviderId`.
-- AWS region: request `region`, else `AWS_REGION`.
+- Region: see [Region](#region).
+
+### Region
+
+The issue and validate APIs take an optional `region`. The region is decided in this order ([src/service/csp_region.go](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_region.go) `ResolveCspRegion`):
+
+1. `region` in the request (`regionSource: "request"`)
+2. `account_info.region` of the CSP account that owns the target CSP role (`regionSource: "account"`)
+3. Neither is set (`regionSource: "none"`):
+   - Tencent: `400 region_required`; STS is not called (Tencent STS rejects an empty region).
+   - AWS: the STS call uses the global endpoint (`us-east-1`). The response `region` is empty and `warnings` reports that the account region is not set.
+   - Alibaba, GCP and others: proceed without a region.
+
+- The issue and validate responses include `region` (the value actually used), `regionSource` and `warnings`.
+- An invalid `region` format returns `400 invalid_region` (for example `ap-northeast-2`, `cn-hangzhou` and `asia-northeast3` are valid).
+- The running server does not read `AWS_REGION` and has no hard-coded default region. Readiness `?checkIssue=true`, the IdP config `test` and account validation also use the account region, or the global endpoint when it is not set.
+- mc-admin-cli sets the initial region of the AWS default account (`aws-default`) from `MC_IAM_MANAGER_AWS_DEFAULT_REGION` in its `.env` (default `ap-northeast-2`), only when the account is created at initial setup. Change it later with `PUT /api/csp-accounts/id/:accountId` or the Cloud SP screen.
 
 `POST /api/workspaces/credentials/validate` runs the same chain step by step and returns per-step results and remediation hints. The provider and trust policy steps use the management credentials of the IdP config (no server AWS credentials are needed) ([src/service/csp_validation_service.go](https://github.com/m-cmp/mc-iam-manager/blob/main/src/service/csp_validation_service.go)).
 
@@ -141,7 +159,7 @@ Details:
 
 - **Management credentials**: every AWS write or lookup (role create/register, provider and trust checks, policy attach/detach and definitions, role delete, trust policy sync, `/api/csp/iam` GET) assumes the IdP config `role_arn` with the OIDC client token (session `mcmp-iam-manager-session`). The config is the role's own active AWS OIDC config, otherwise the account's single active AWS OIDC config. Credentials are cached in memory per config.
 - Account validation checks each AWS role of the account (provider exists and trust policy verdict, `results[].trustPolicy`); other CSPs get a generic check.
-- Readiness (`GET /api/csp-accounts/id/:accountId/readiness`): stages `keycloak_oidc_client`, `csp_account`, `idp_config`, `provider_trust`, `csp_role`, `role_mapping`, `issue` with `ok | failed | pending | skipped | not_applicable`, plus `canMapRoles` / `canIssue`. `?checkIssue=true` tries a real assume for AWS OIDC roles (credentials discarded) and adds `cspRoles[].trustPolicy`. Live checks run only for platform admins.
+- Readiness (`GET /api/csp-accounts/id/:accountId/readiness`): stages `keycloak_oidc_client`, `csp_account`, `idp_config`, `provider_trust`, `csp_role`, `role_mapping`, `issue` with `ok | failed | pending | skipped | not_applicable`, plus `canMapRoles` / `canIssue`. `?checkIssue=true` tries a real assume for AWS OIDC roles in the account region, or the global endpoint when it is not set (credentials discarded) and adds `cspRoles[].trustPolicy`. Live checks run only for platform admins.
 - Trust policy check / sync: verdicts `ok | missing | mismatch | not_found | error` (+ informational `extra`). Sync changes only the statement that trusts the IdP config provider (`statement_added | action_added | aud_set | aud_removed`) and keeps other statements. Registered roles need `allowRegistered`; management roles are refused.
 - IdP config `test`: AWS OIDC (STS `AssumeRoleWithWebIdentity` with `role_arn`) and AWS `SECRET_KEY`; GCP/Azure OIDC and all SAML tests return "not implemented".
 - Policies (AWS only) are applied in AWS: `managed` (AWS managed ARN, attach/detach only), `custom` (customer managed, shared; IAM can create, version and delete `mciam-*` policies), `inline` (one role only, `PutRolePolicy`). Attach/detach body `{csp_role_id, csp_policy_id}`; an AWS failure returns 200 with `result=failed|detach_failed` and the binding keeps `aws_status` / `last_error` until the same request is sent again. Non-`mciam-` roles, `AdministratorAccess` / `IAMFullAccess` / `PowerUserAccess`, and documents allowing `*` or `iam:*` (or using `NotAction`) are refused with 403 `forbidden_policy`.
@@ -169,12 +187,11 @@ At runtime the CSP values (management role, provider ARN, audience) come only fr
 |---|---|---|
 | `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_NAME`, `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_SECRET` | [keycloak.go](https://github.com/m-cmp/mc-iam-manager/blob/main/src/config/keycloak.go) | Service-account login for OIDC federation and token exchange; the client is created by `POST /api/initial-admin` if missing |
 | `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_ID` | [keycloak.go](https://github.com/m-cmp/mc-iam-manager/blob/main/src/config/keycloak.go) | Must be non-empty at start-up. Not used in trust policies |
-| `AWS_REGION` | aws_credential_service.go, csp_validation_service.go | Default AWS region (else `ap-northeast-2`) |
 | `AWS_STS_ENDPOINT` | [csp/aws/iam.go](https://github.com/m-cmp/mc-iam-manager/blob/main/src/csp/aws/iam.go) | STS endpoint for the `/api/csp/iam` client |
 | `SAML_CLIENT_ID_AWS`, `SAML_CLIENT_ID_ALIBABA` | csp_credential_service.go, csp_role_service.go, csp_validation_service.go | Only an example value in error messages, a warning-only check at SAML role creation, and a fallback in the validate API. The real value is the CSP role `extendedConfig.saml_client_id` |
 | `MC_IAM_MANAGER_PLATFORMADMIN_ID`, `MC_IAM_MANAGER_PLATFORMADMIN_PASSWORD` | keycloak_service.go | User session for SAML token exchange |
 
-`MC_IAM_MANAGER_AWS_ACCOUNT_ID`, `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL` (for trust policies), `MC_IAM_MANAGER_AWS_IDENTITY_ROLE_ARN`, `MC_IAM_MANAGER_CSP_ROLE_PREFIX`, `MC_IAM_MANAGER_AWS_IDENTITY_PROVIDER_ARN` and `TEMPORARY_SECURITY_CREDENTIALS_ENDPOINT_AWS` are not read by the running server (the role prefix is the constant `mciam-`); the mc-admin-cli bootstrap uses some of them to create the IdP config. See [Configuration Reference](Configuration-Reference).
+`MC_IAM_MANAGER_AWS_ACCOUNT_ID`, `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL` (for trust policies), `MC_IAM_MANAGER_AWS_IDENTITY_ROLE_ARN`, `MC_IAM_MANAGER_CSP_ROLE_PREFIX`, `MC_IAM_MANAGER_AWS_IDENTITY_PROVIDER_ARN`, `TEMPORARY_SECURITY_CREDENTIALS_ENDPOINT_AWS` and `AWS_REGION` are not read by the running server (the role prefix is the constant `mciam-`); the mc-admin-cli bootstrap uses some of them to create the IdP config. See [Configuration Reference](Configuration-Reference).
 
 ## Caveats
 

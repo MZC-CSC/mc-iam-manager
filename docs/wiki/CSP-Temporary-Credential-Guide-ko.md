@@ -179,9 +179,10 @@ AWS Role의 신뢰 정책은 환경변수가 아니라 **IdP Config 값**(`oidc_
 | `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_SECRET` | 1-1 클라이언트의 secret | `401 invalid_client` |
 | `MC_IAM_MANAGER_KEYCLOAK_OIDC_CLIENT_ID` | 비어 있지 않은 값 (보통 `<OIDC_CLIENT>`) | 비어 있으면 기동 실패. 신뢰 정책에는 쓰이지 않음 |
 | `MC_IAM_MANAGER_PLATFORMADMIN_ID`, `MC_IAM_MANAGER_PLATFORMADMIN_PASSWORD` | 플랫폼 관리자 계정 | SAML 발급만 실패 |
-| `AWS_REGION` | 선택. 요청·계정에 region이 없을 때 기본값 (없으면 `ap-northeast-2`) | |
 
 `MC_IAM_MANAGER_AWS_ACCOUNT_ID`, `MC_IAM_MANAGER_KEYCLOAK_EXTERNAL_URL`, `MC_IAM_MANAGER_AWS_IDENTITY_ROLE_ARN`은 mc-iam-manager가 실행 중에 읽지 않습니다. mc-admin-cli 부트스트랩이 IdP Config를 만들 때만 씁니다.
+
+`AWS_REGION`도 실행 중에는 읽지 않습니다. 발급 리전은 요청의 `region`, 없으면 CSP Account의 `account_info.region`으로 정합니다([7-1](#7-1-발급)의 리전 규칙). mc-admin-cli `.env`의 `MC_IAM_MANAGER_AWS_DEFAULT_REGION`(기본 `ap-northeast-2`)은 최초 설정 때 `aws-default` 계정의 `account_info.region`으로만 쓰입니다.
 
 **mc-admin-cli로 설치한 서버**에서는:
 
@@ -384,7 +385,7 @@ aws iam simulate-principal-policy \
 
 > **수행 위치: mc-web-console**(4-1), **브라우저 개발자 도구**(4-2, [사용법](#개발자-도구에서-api-호출하기))
 >
-> mc-admin-cli로 설치했다면 부트스트랩이 `aws-default` 계정과 `aws-oidc` IdP Config를 만들어 둡니다. 값이 맞는지만 확인하세요.
+> mc-admin-cli로 설치했다면 부트스트랩이 `aws-default` 계정과 `aws-oidc` IdP Config를 만들어 둡니다. 값이 맞는지만 확인하세요. `aws-default`의 `region`은 mc-admin-cli `.env`의 `MC_IAM_MANAGER_AWS_DEFAULT_REGION`(기본 `ap-northeast-2`) 값입니다.
 
 ### 4-1. CSP Account
 
@@ -396,7 +397,9 @@ mc-web-console → **Settings > Environment > Cloud SPs > CSP Accounts** → Add
 | CSP Provider | AWS |
 | Credential Data (JSON) | `{"account_id": "<ACCOUNT_ID>", "region": "ap-northeast-2"}` |
 
-> **Credential Data 칸에는 액세스 키가 아니라 계정 정보를 넣습니다.** 입력란 예시가 `{"accessKey": ...}`로 되어 있지만 실제로는 계정 정보(`account_info`)로 저장되고, 필수 키가 없으면 등록이 거부됩니다. CSP별 필수 키: AWS·Alibaba `account_id`, GCP `project_id`, Tencent `app_id`, Azure `subscription_id`와 `tenant_id` (`region`은 선택).
+> **Credential Data 칸에는 액세스 키가 아니라 계정 정보를 넣습니다.** 입력란 예시가 `{"accessKey": ...}`로 되어 있지만 실제로는 계정 정보(`account_info`)로 저장되고, 필수 키가 없으면 등록이 거부됩니다. CSP별 필수 키: AWS·Alibaba `account_id`, GCP `project_id`, Tencent `app_id`, Azure `subscription_id`와 `tenant_id`.
+>
+> `region`은 계정의 기본 리전입니다. 발급 요청에 `region`이 없으면 이 값을 씁니다. Tencent는 필수(`400 region_required`)이고 다른 CSP는 선택이며, 값이 있으면 형식을 검사합니다(`400 invalid_region`). 나중에 바꿀 때 `PUT /api/csp-accounts/id/{id}`의 `account_info`에 `region` 키를 빼면 기존 값이 유지되고, `"region": ""`은 삭제입니다(Tencent는 삭제 불가).
 
 등록한 계정의 id를 확인합니다(개발자 도구 콘솔):
 
@@ -580,6 +583,11 @@ var cred = await api('POST', '/api/workspaces/temporary-credentials',
 - 워크스페이스 목록 조회는 관리자 권한이 필요하므로 사용자로 전환하기 **전에** 확인합니다. `workspaceId`는 문자열로 넣습니다.
 - `cspType`은 소문자(`aws`, `gcp`, `alibaba`, `tencent`, `azure`)입니다.
 - `authMethod`는 생략할 수 있지만, 한 역할에 OIDC·SAML 매핑이 둘 다 있으면 지정하세요.
+- `region`은 생략할 수 있습니다. 리전은 다음 순서로 정합니다.
+  1. 요청의 `region` (`regionSource: "request"`)
+  2. CSP Account의 `account_info.region` (`regionSource: "account"`)
+  3. 둘 다 없으면(`regionSource: "none"`) Tencent는 `400 region_required`, AWS는 글로벌 STS(`us-east-1`)로 발급하고 응답 `region`을 비운 채 `warnings`에 계정 리전 미설정을 알립니다. Alibaba·GCP는 리전 없이 진행합니다.
+  - 형식이 잘못된 `region`(예: `Seoul`)은 `400 invalid_region`입니다.
 
 정상 응답(AWS):
 
@@ -590,7 +598,8 @@ var cred = await api('POST', '/api/workspaces/temporary-credentials',
   "secretAccessKey": "...",
   "sessionToken": "...",
   "expiration": "2026-01-01T01:00:00Z",
-  "region": "ap-northeast-2"
+  "region": "ap-northeast-2",
+  "regionSource": "request"
 }
 ```
 
