@@ -51,8 +51,7 @@ type readinessTrustVerifier interface {
 var ErrCspAccountNotFound = fmt.Errorf("CSP account not found")
 
 const (
-	readinessLiveCallTimeout  = 15 * time.Second
-	readinessDefaultAwsRegion = "ap-northeast-2"
+	readinessLiveCallTimeout = 15 * time.Second
 )
 
 // CspAccountReadinessService CSP 계정별 임시자격증명 연동 준비 상태(readiness) 판정 (IAM-TECH-044).
@@ -464,10 +463,10 @@ func (s *CspAccountReadinessService) checkIssue(ctx context.Context, account *mo
 		return stage
 	}
 
-	// 계정에 region 이 없으면 연결 테스트·Role 생성 경로와 같은 기본 리전을 쓴다 (빈 값이면 STS endpoint 해석 실패)
-	region := account.GetRegion()
-	if region == "" {
-		region = readinessDefaultAwsRegion
+	// region: 계정 account_info.region, 없으면 글로벌 STS (발급과 같은 ResolveCspRegion, IAM-BUG-065)
+	region := awsCallRegion("")
+	if reg, err := ResolveCspRegion(account.CspType, "", account); err == nil {
+		region = reg.CallRegion
 	}
 	var token *gocloak.JWT
 	var tokenErr error

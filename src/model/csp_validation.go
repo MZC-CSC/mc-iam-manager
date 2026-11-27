@@ -33,6 +33,7 @@ type CspValidationRequest struct {
 	WorkspaceID string `json:"workspaceId"` // 대상 워크스페이스 ID
 	CspType     string `json:"cspType"`     // CSP 유형 (aws, gcp, ...)
 	AuthMethod  string `json:"authMethod"`  // 인증방식 (OIDC, SAML, SECRET_KEY)
+	Region      string `json:"region,omitempty"` // 리전 (선택). 없으면 대상 CSP 계정의 account_info.region
 }
 
 // CspValidationResponse 검증 응답 — 실패 여부와 무관하게 모든 단계 포함
@@ -46,6 +47,10 @@ type CspValidationResponse struct {
 	Credentials *CredentialSummary `json:"credentials,omitempty"` // valid=true일 때만
 	// UsedRole 진단에 사용한 워크스페이스 역할과 출처 (발급과 같은 결정 규칙). 역할이 없으면 생략
 	UsedRole *UsedWorkspaceRole `json:"usedRole,omitempty"`
+	// Region·RegionSource 발급 단계에서 쓴 region 과 출처(request|account|none). 발급 단계까지 가지 않으면 생략
+	Region       string   `json:"region,omitempty"`
+	RegionSource string   `json:"regionSource,omitempty"`
+	Warnings     []string `json:"warnings,omitempty"`
 }
 
 // CredentialSummary 발급된 자격증명 요약 (secret은 미포함)

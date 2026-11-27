@@ -579,7 +579,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Create a new CSP account",
+                "description": "Create a new CSP account\naccount_info.region is the default region for temporary credentials (used when a request has no region). Required for tencent (400 region_required); when set it must be a region code (400 invalid_region).",
                 "consumes": [
                     "application/json"
                 ],
@@ -700,7 +700,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Update CSP account details",
+                "description": "Update CSP account details\naccount_info replaces the stored map, except region: when account_info has no \"region\" key the stored region is kept; \"region\": \"\" removes it (not allowed for tencent).",
                 "consumes": [
                     "application/json"
                 ],
@@ -13293,7 +13293,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get temporary credentials for CSP\nAWS SAML: before issuing, the SAML provider is read with the management credential. 400 invalid_request when the provider does not exist in AWS; other check failures (e.g. AccessDenied) only log a warning.",
+                "description": "Get temporary credentials for CSP\nAWS SAML: before issuing, the SAML provider is read with the management credential. 400 invalid_request when the provider does not exist in AWS; other check failures (e.g. AccessDenied) only log a warning.\nregion: the request ` + "`" + `region` + "`" + ` is used first, otherwise ` + "`" + `account_info.region` + "`" + ` of the CSP account the target CSP role belongs to. The response carries the used ` + "`" + `region` + "`" + ` and ` + "`" + `regionSource` + "`" + ` (request|account|none).\nWhen neither is set: tencent returns 400 errorCode region_required (STS is not called); aws issues through the global STS endpoint with an empty response region and a ` + "`" + `warnings` + "`" + ` entry; other CSPs proceed without a region. 400 invalid_region for a malformed region.",
                 "consumes": [
                     "application/json"
                 ],
@@ -15044,6 +15044,10 @@ const docTemplate = `{
                     "description": "CSP 유형 (aws, gcp, ...)",
                     "type": "string"
                 },
+                "region": {
+                    "description": "리전 (선택). 없으면 대상 CSP 계정의 account_info.region",
+                    "type": "string"
+                },
                 "workspaceId": {
                     "description": "대상 워크스페이스 ID",
                     "type": "string"
@@ -15074,6 +15078,13 @@ const docTemplate = `{
                     "description": "0=전체성공, N=N번 단계 실패",
                     "type": "integer"
                 },
+                "region": {
+                    "description": "Region·RegionSource 발급 단계에서 쓴 region 과 출처(request|account|none). 발급 단계까지 가지 않으면 생략",
+                    "type": "string"
+                },
+                "regionSource": {
+                    "type": "string"
+                },
                 "steps": {
                     "description": "항상 전체 단계 포함",
                     "type": "array",
@@ -15091,6 +15102,12 @@ const docTemplate = `{
                 },
                 "valid": {
                     "type": "boolean"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

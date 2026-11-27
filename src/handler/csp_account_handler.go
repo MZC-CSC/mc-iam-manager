@@ -37,6 +37,7 @@ func NewCspAccountHandler(db *gorm.DB) *CspAccountHandler {
 // CreateCspAccount godoc
 // @Summary Create CSP account
 // @Description Create a new CSP account
+// @Description account_info.region is the default region for temporary credentials (used when a request has no region). Required for tencent (400 region_required); when set it must be a region code (400 invalid_region).
 // @Tags csp-accounts
 // @Accept json
 // @Produce json
@@ -66,6 +67,9 @@ func (h *CspAccountHandler) CreateCspAccount(c echo.Context) error {
 
 	account, err := h.cspAccountService.CreateCspAccount(&req)
 	if err != nil {
+		if code, body, ok := accountRegionErrorResponse(err); ok {
+			return c.JSON(code, body)
+		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create CSP account: %v", err)})
 	}
 
@@ -136,6 +140,7 @@ func (h *CspAccountHandler) GetCspAccountByID(c echo.Context) error {
 // UpdateCspAccount godoc
 // @Summary Update CSP account
 // @Description Update CSP account details
+// @Description account_info replaces the stored map, except region: when account_info has no "region" key the stored region is kept; "region": "" removes it (not allowed for tencent).
 // @Tags csp-accounts
 // @Accept json
 // @Produce json
@@ -161,6 +166,9 @@ func (h *CspAccountHandler) UpdateCspAccount(c echo.Context) error {
 
 	account, err := h.cspAccountService.UpdateCspAccount(accountID, &req)
 	if err != nil {
+		if code, body, ok := accountRegionErrorResponse(err); ok {
+			return c.JSON(code, body)
+		}
 		if err.Error() == fmt.Sprintf("CSP account not found with ID: %d", accountID) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 		}
@@ -340,4 +348,15 @@ func (h *CspAccountHandler) DeactivateCspAccount(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "CSP account deactivated successfully"})
+}
+
+// accountRegionErrorResponse 계정 region 검증 오류 → 400 (IAM-BUG-065)
+func accountRegionErrorResponse(err error) (int, map[string]string, bool) {
+	switch {
+	case errors.Is(err, service.ErrRegionRequired):
+		return http.StatusBadRequest, map[string]string{"error": err.Error(), "errorCode": "region_required"}, true
+	case errors.Is(err, service.ErrInvalidRegion):
+		return http.StatusBadRequest, map[string]string{"error": err.Error(), "errorCode": "invalid_region"}, true
+	}
+	return 0, nil, false
 }

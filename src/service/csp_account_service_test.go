@@ -203,6 +203,7 @@ func TestCspAccountValidate_Tencent_Valid(t *testing.T) {
 		CspType: "tencent",
 		AccountInfo: map[string]string{
 			"app_id": "1234567890",
+			"region": "ap-guangzhou", // tencent 는 생성 시 region 필수 (IAM-BUG-065)
 		},
 	})
 	require.NoError(t, err)
@@ -218,7 +219,7 @@ func TestCspAccountValidate_Tencent_MissingAppID(t *testing.T) {
 	created, err := svc.CreateCspAccount(&model.CreateCspAccountRequest{
 		Name:        "test-tencent-missing",
 		CspType:     "tencent",
-		AccountInfo: map[string]string{},
+		AccountInfo: map[string]string{"region": "ap-guangzhou"}, // region 은 필수라 넣고 app_id 만 뺀다
 	})
 	require.NoError(t, err)
 

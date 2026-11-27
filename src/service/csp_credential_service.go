@@ -95,9 +95,18 @@ func (s *CspCredentialService) resolveMappingRepo() credMappingRepo {
 func (s *CspCredentialService) GetTemporaryCredentials(ctx context.Context, userID uint, kcUserId string, req *model.CspCredentialRequest) (resp *model.CspCredentialResponse, err error) {
 	// 발급에 사용한 역할을 응답에 싣는다 (아래 1단계에서 결정)
 	var usedRole *model.EffectiveWorkspaceRole
+	// 발급에 사용한 region 과 출처를 응답에 싣는다 (IAM-BUG-065, 대상 CspRole 확인 후 결정)
+	var usedRegion *CspRegion
 	defer func() {
 		if resp != nil && usedRole != nil {
 			resp.UsedRole = usedRole.ToUsedRole()
+		}
+		if resp != nil && usedRegion != nil {
+			resp.Region = usedRegion.Region
+			resp.RegionSource = usedRegion.Source
+			if usedRegion.Warning != "" {
+				resp.Warnings = append(resp.Warnings, usedRegion.Warning)
+			}
 		}
 	}()
 	log.Printf("[CSP_CREDENTIAL] Starting GetTemporaryCredentials - UserID: %d, WorkspaceID: %s, CspType: %s", userID, req.WorkspaceID, req.CspType)
@@ -113,12 +122,11 @@ func (s *CspCredentialService) GetTemporaryCredentials(ctx context.Context, user
 	}
 
 	cspType := req.CspType
-	region := req.Region
 	if cspType == "" {
 		log.Printf("[CSP_CREDENTIAL] Error: csp type is empty")
 		return nil, fmt.Errorf("csp type is required")
 	}
-	log.Printf("[CSP_CREDENTIAL] Parameters - WorkspaceID: %d, CspType: %s, Region: %s", workspaceIDInt, cspType, region)
+	log.Printf("[CSP_CREDENTIAL] Parameters - WorkspaceID: %d, CspType: %s, Region(request): %s", workspaceIDInt, cspType, req.Region)
 
 	// 1. Get User's effective Role for the specified Workspace (직접 배정 우선, 없으면 그룹 상속 —
 	// P1-3/OPEN-016 결정: 그룹 워크스페이스 역할도 실제 발급 근거로 인정한다)
@@ -159,6 +167,16 @@ func (s *CspCredentialService) GetTemporaryCredentials(ctx context.Context, user
 	}
 	targetCspRole := targetMapping.CspRoles[0]
 	log.Printf("[CSP_CREDENTIAL] Found CSP role mapping - RoleID: %d, CspRoleID: %d", targetMapping.RoleID, targetCspRole.ID)
+
+	// region: 요청 → 대상 CspRole 의 CSP 계정 account_info.region (IAM-BUG-065). 필수 CSP 인데 없으면 STS 를 부르지 않는다
+	regionInfo, err := ResolveCspRegion(cspType, req.Region, cspRoleAccount(targetCspRole))
+	if err != nil {
+		log.Printf("[CSP_CREDENTIAL] Error resolving region: %v", err)
+		return nil, err
+	}
+	usedRegion = &regionInfo
+	region := regionInfo.CallRegion
+	log.Printf("[CSP_CREDENTIAL] Region: %q (source: %s, call: %q)", regionInfo.Region, regionInfo.Source, region)
 
 	// 3. IDP ARN 가져오기
 	if targetCspRole == nil {

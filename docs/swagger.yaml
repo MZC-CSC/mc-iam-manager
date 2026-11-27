@@ -1017,6 +1017,9 @@ definitions:
       cspType:
         description: CSP 유형 (aws, gcp, ...)
         type: string
+      region:
+        description: 리전 (선택). 없으면 대상 CSP 계정의 account_info.region
+        type: string
       workspaceId:
         description: 대상 워크스페이스 ID
         type: string
@@ -1036,6 +1039,12 @@ definitions:
       failedStep:
         description: 0=전체성공, N=N번 단계 실패
         type: integer
+      region:
+        description: Region·RegionSource 발급 단계에서 쓴 region 과 출처(request|account|none).
+          발급 단계까지 가지 않으면 생략
+        type: string
+      regionSource:
+        type: string
       steps:
         description: 항상 전체 단계 포함
         items:
@@ -1047,6 +1056,10 @@ definitions:
         description: UsedRole 진단에 사용한 워크스페이스 역할과 출처 (발급과 같은 결정 규칙). 역할이 없으면 생략
       valid:
         type: boolean
+      warnings:
+        items:
+          type: string
+        type: array
     type: object
   model.EffectivePlatformRoleItem:
     properties:
@@ -2759,7 +2772,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new CSP account
+      description: |-
+        Create a new CSP account
+        account_info.region is the default region for temporary credentials (used when a request has no region). Required for tencent (400 region_required); when set it must be a region code (400 invalid_region).
       operationId: createCspAccount
       parameters:
       - description: CSP Account Info
@@ -2876,7 +2891,9 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update CSP account details
+      description: |-
+        Update CSP account details
+        account_info replaces the stored map, except region: when account_info has no "region" key the stored region is kept; "region": "" removes it (not allowed for tencent).
       operationId: updateCspAccount
       parameters:
       - description: Account ID
@@ -11104,6 +11121,8 @@ paths:
       description: |-
         Get temporary credentials for CSP
         AWS SAML: before issuing, the SAML provider is read with the management credential. 400 invalid_request when the provider does not exist in AWS; other check failures (e.g. AccessDenied) only log a warning.
+        region: the request `region` is used first, otherwise `account_info.region` of the CSP account the target CSP role belongs to. The response carries the used `region` and `regionSource` (request|account|none).
+        When neither is set: tencent returns 400 errorCode region_required (STS is not called); aws issues through the global STS endpoint with an empty response region and a `warnings` entry; other CSPs proceed without a region. 400 invalid_region for a malformed region.
       operationId: mciamGetTemporaryCredentials
       produces:
       - application/json

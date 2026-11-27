@@ -222,9 +222,10 @@ func (s *CspIdpConfigService) testAwsOidcConnection(ctx context.Context, idpConf
 	}
 
 	// AWS STS 클라이언트 생성
-	region := account.GetRegion()
-	if region == "" {
-		region = "ap-northeast-2"
+	// region: 계정 account_info.region, 없으면 글로벌 STS (발급과 같은 ResolveCspRegion, IAM-BUG-065)
+	region := awsCallRegion("")
+	if reg, rerr := ResolveCspRegion("aws", "", account); rerr == nil {
+		region = reg.CallRegion
 	}
 
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
@@ -289,9 +290,10 @@ func (s *CspIdpConfigService) testAwsSecretKeyConnection(ctx context.Context, id
 	}
 
 	// AWS 설정 생성
-	region := account.GetRegion()
-	if region == "" {
-		region = "ap-northeast-2"
+	// region: 계정 account_info.region, 없으면 글로벌 STS (발급과 같은 ResolveCspRegion, IAM-BUG-065)
+	region := awsCallRegion("")
+	if reg, rerr := ResolveCspRegion("aws", "", account); rerr == nil {
+		region = reg.CallRegion
 	}
 
 	cfg, err := config.LoadDefaultConfig(ctx,
@@ -396,9 +398,10 @@ func (s *CspIdpConfigService) AssumeRoleWithIdpConfig(ctx context.Context, idpCo
 		return nil, fmt.Errorf("only AWS is supported for AssumeRole currently")
 	}
 
-	region := account.GetRegion()
-	if region == "" {
-		region = "ap-northeast-2"
+	// region: 계정 account_info.region, 없으면 글로벌 STS (발급과 같은 ResolveCspRegion, IAM-BUG-065)
+	region := awsCallRegion("")
+	if reg, rerr := ResolveCspRegion("aws", "", account); rerr == nil {
+		region = reg.CallRegion
 	}
 
 	switch idpConfig.AuthMethod {

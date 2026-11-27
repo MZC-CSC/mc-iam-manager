@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	aws "github.com/aws/aws-sdk-go-v2/aws"
@@ -19,7 +18,7 @@ type AwsCredentialService interface {
 	AssumeRoleWithWebIdentity(ctx context.Context, roleArn, kcUserId, webIdentityToken, idpArn, region string) (*model.CspCredentialResponse, error)
 	AssumeRoleWithSAML(ctx context.Context, roleArn, principalArn, samlAssertion, region string) (*model.CspCredentialResponse, error)
 	// CheckCallerIdentity SECRET_KEY 자격증명 유효성 확인 (STS GetCallerIdentity)
-	CheckCallerIdentity(ctx context.Context, accessKeyID, secretKey string) (string, error)
+	CheckCallerIdentity(ctx context.Context, accessKeyID, secretKey, region string) (string, error)
 }
 
 // awsCredentialService implements AwsCredentialService.
@@ -44,12 +43,8 @@ func (s *awsCredentialService) AssumeRoleWithWebIdentity(ctx context.Context, ro
 		return nil, fmt.Errorf("failed to load AWS configuration: %w", err)
 	}
 
-	// Set region if provided
-	if region != "" {
-		awsCfg.Region = region
-	} else if envRegion := os.Getenv("AWS_REGION"); envRegion != "" {
-		awsCfg.Region = envRegion
-	}
+	// region 은 호출하는 쪽(ResolveCspRegion)이 정한 값만 쓴다. env AWS_REGION 은 보지 않는다 (IAM-BUG-065)
+	awsCfg.Region = awsCallRegion(region)
 	log.Printf("[AWS_CREDENTIAL] Using AWS Region: %s for STS call", awsCfg.Region)
 
 	stsClient := sts.NewFromConfig(awsCfg)
@@ -95,13 +90,9 @@ func (s *awsCredentialService) AssumeRoleWithWebIdentity(ctx context.Context, ro
 }
 
 // CheckCallerIdentity SECRET_KEY 자격증명 유효성 확인 (STS GetCallerIdentity SDK signed call)
-func (s *awsCredentialService) CheckCallerIdentity(ctx context.Context, accessKeyID, secretKey string) (string, error) {
-	region := os.Getenv("AWS_REGION")
-	if region == "" {
-		region = "ap-northeast-2"
-	}
+func (s *awsCredentialService) CheckCallerIdentity(ctx context.Context, accessKeyID, secretKey, region string) (string, error) {
 	cfg, err := awsconfig.LoadDefaultConfig(ctx,
-		awsconfig.WithRegion(region),
+		awsconfig.WithRegion(awsCallRegion(region)),
 		awsconfig.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider(accessKeyID, secretKey, ""),
 		),
@@ -130,11 +121,7 @@ func (s *awsCredentialService) AssumeRoleWithSAML(ctx context.Context, roleArn, 
 		return nil, fmt.Errorf("failed to load AWS configuration: %w", err)
 	}
 
-	if region != "" {
-		awsCfg.Region = region
-	} else if envRegion := os.Getenv("AWS_REGION"); envRegion != "" {
-		awsCfg.Region = envRegion
-	}
+	awsCfg.Region = awsCallRegion(region)
 	log.Printf("[AWS_CREDENTIAL] Using AWS Region: %s for SAML STS call", awsCfg.Region)
 
 	stsClient := sts.NewFromConfig(awsCfg)
@@ -166,4 +153,12 @@ func (s *awsCredentialService) AssumeRoleWithSAML(ctx context.Context, roleArn, 
 		Expiration:      *result.Credentials.Expiration,
 		Region:          awsCfg.Region,
 	}, nil
+}
+
+// awsCallRegion STS 호출 리전. 비어 있으면 글로벌 STS 엔드포인트 리전 (SDK 의 env·공유 설정 기본값을 쓰지 않는다)
+func awsCallRegion(region string) string {
+	if region == "" {
+		return awsGlobalStsRegion
+	}
+	return region
 }

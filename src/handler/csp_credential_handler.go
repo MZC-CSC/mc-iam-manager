@@ -37,6 +37,8 @@ func NewCspCredentialHandler(db *gorm.DB) *CspCredentialHandler {
 // @Summary Get temporary credentials
 // @Description Get temporary credentials for CSP
 // @Description AWS SAML: before issuing, the SAML provider is read with the management credential. 400 invalid_request when the provider does not exist in AWS; other check failures (e.g. AccessDenied) only log a warning.
+// @Description region: the request `region` is used first, otherwise `account_info.region` of the CSP account the target CSP role belongs to. The response carries the used `region` and `regionSource` (request|account|none).
+// @Description When neither is set: tencent returns 400 errorCode region_required (STS is not called); aws issues through the global STS endpoint with an empty response region and a `warnings` entry; other CSPs proceed without a region. 400 invalid_region for a malformed region.
 // @Tags csp-credentials
 // @Accept json
 // @Produce json
@@ -99,6 +101,13 @@ func (h *CspCredentialHandler) GetTemporaryCredentials(c echo.Context) error {
 		}
 		if errors.Is(err, service.ErrUnsupportedCspType) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		// region: 필수 CSP 인데 요청·계정 모두 없음 / 형식 오류 — STS 를 부르지 않았다 (IAM-BUG-065)
+		if errors.Is(err, service.ErrRegionRequired) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "errorCode": "region_required"})
+		}
+		if errors.Is(err, service.ErrInvalidRegion) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "errorCode": "invalid_region"})
 		}
 		// 발급 사전 확인에서 provider 가 AWS 에 없다고 확인됨 — 설정 오류 (IAM-TECH-045 M2)
 		if errors.Is(err, service.ErrCspProviderNotFound) {
