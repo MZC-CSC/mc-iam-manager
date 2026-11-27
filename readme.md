@@ -20,6 +20,7 @@ This repository provides a multi-cloud IAM management framework as a subsystem o
 - [Menu Management](#menu-management)
 - [API Documentation](#api-documentation)
 - [CSP Policy Management](#csp-policy-management)
+- [Temporary Credentials and Region](#temporary-credentials-and-region)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -485,6 +486,38 @@ Without these permissions, the calls fail as described above (`200` with `failed
 ### Existing Data
 
 Rows created before the policy types above were defined are not migrated automatically. Use the migration SQL in the release notes.
+
+## Temporary Credentials and Region
+
+`POST /api/workspaces/temporary-credentials` (issue) and `POST /api/workspaces/credentials/validate` (diagnose) take an optional `region`. IAM Manager decides the region in this order:
+
+1. `region` in the request (`regionSource: "request"`)
+2. `account_info.region` of the CSP account that owns the target CSP Role (`regionSource: "account"`)
+3. Neither is set (`regionSource: "none"`):
+
+| CSP | When neither is set |
+|---|---|
+| tencent | `400 region_required`. STS is not called |
+| aws | Issued through the global STS endpoint (`us-east-1`). The response `region` is empty and `warnings` says the account region is not set |
+| alibaba, gcp, others | Proceeds without a region |
+
+- The response includes `region` (the value actually used), `regionSource` and `warnings`.
+- An invalid `region` format returns `400 invalid_region` (valid examples: `ap-northeast-2`, `cn-hangzhou`, `asia-northeast3`).
+- At runtime IAM Manager does **not** read the `AWS_REGION` environment variable and has no hard-coded default region. Readiness checks, IdP Config connection tests and CSP account checks also use the account region, or the global endpoint when it is not set.
+
+### CSP Account Region
+
+- Set the default region in `account_info.region` of the CSP account (`POST /api/csp-accounts`, `PUT /api/csp-accounts/id/{id}`, or the Cloud SP screen).
+  - Create: `tencent` requires `region` (`400 region_required`). For other CSPs the value is optional and its format is checked.
+  - Update: if `account_info` has no `region` key, the existing region is kept. `"region": ""` removes it (not allowed for `tencent`). Other keys of `account_info` are replaced as before.
+- The initial value of the AWS default CSP account (`aws-default`) comes from `MC_IAM_MANAGER_AWS_DEFAULT_REGION` in mc-admin-cli `.env` (default `ap-northeast-2`). It is used only when the account is created at initial setup.
+- Installations that set the region only in the server environment: set `account_info.region` to keep the previous behavior.
+
+```sql
+-- CSP accounts without a region
+SELECT id, name, csp_type, account_info FROM mcmp_csp_accounts
+ WHERE coalesce(account_info->>'region', '') = '';
+```
 
 ## Troubleshooting
 

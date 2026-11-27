@@ -20,6 +20,7 @@
 - [메뉴 관리](#메뉴-관리)
 - [API 문서](#api-문서)
 - [CSP 정책 관리](#csp-정책-관리)
+- [임시자격증명과 리전](#임시자격증명과-리전)
 - [기여하기](#기여하기)
 - [라이선스](#라이선스)
 
@@ -486,6 +487,38 @@ IAM Manager 는 관리용 Role(`mciam-admin`)로 AWS 를 호출한다. CSP 역�
 ### 기존 데이터
 
 위 정책 타입이 정해지기 전에 만든 행은 자동으로 옮기지 않는다. 릴리스 노트의 마이그레이션 SQL 을 쓴다.
+
+## 임시자격증명과 리전
+
+`POST /api/workspaces/temporary-credentials`(발급)와 `POST /api/workspaces/credentials/validate`(진단)는 `region` 을 선택으로 받는다. IAM Manager 는 다음 순서로 리전을 정한다.
+
+1. 요청의 `region` (`regionSource: "request"`)
+2. 대상 CSP Role 이 속한 CSP 계정의 `account_info.region` (`regionSource: "account"`)
+3. 둘 다 없을 때 (`regionSource: "none"`)
+
+| CSP | 둘 다 없을 때 |
+|---|---|
+| tencent | `400 region_required`. STS 를 호출하지 않는다 |
+| aws | 글로벌 STS 엔드포인트(`us-east-1`)로 발급한다. 응답 `region` 은 비어 있고 `warnings` 에 계정 리전 미설정을 알린다 |
+| alibaba, gcp, 그 밖 | 리전 없이 진행한다 |
+
+- 응답에는 `region`(실제로 쓴 값), `regionSource`, `warnings` 가 들어간다.
+- `region` 형식이 잘못되면 `400 invalid_region` 이다(통과 예: `ap-northeast-2`, `cn-hangzhou`, `asia-northeast3`).
+- 실행 중에는 환경변수 `AWS_REGION` 을 읽지 **않고**, 하드코딩한 기본 리전도 없다. readiness 점검, IdP Config 연결 테스트, CSP 계정 검증도 계정 리전을 쓰고, 없으면 글로벌 엔드포인트를 쓴다.
+
+### CSP 계정 리전
+
+- 기본 리전은 CSP 계정의 `account_info.region` 에 둔다(`POST /api/csp-accounts`, `PUT /api/csp-accounts/id/{id}`, 또는 Cloud SP 화면).
+  - 생성: `tencent` 는 `region` 이 필수다(`400 region_required`). 다른 CSP 는 선택이고, 값이 있으면 형식을 검사한다.
+  - 수정: `account_info` 에 `region` 키가 없으면 기존 리전을 그대로 둔다. `"region": ""` 은 삭제다(`tencent` 는 삭제 불가). `account_info` 의 다른 키는 지금처럼 통째로 바뀐다.
+- AWS 기본 CSP 계정(`aws-default`)의 최초 값은 mc-admin-cli `.env` 의 `MC_IAM_MANAGER_AWS_DEFAULT_REGION`(기본 `ap-northeast-2`)이다. 최초 설정에서 계정을 만들 때만 쓴다.
+- 서버 환경변수에만 리전을 두던 설치는 `account_info.region` 을 설정하면 이전 동작과 같아진다.
+
+```sql
+-- 리전이 없는 CSP 계정
+SELECT id, name, csp_type, account_info FROM mcmp_csp_accounts
+ WHERE coalesce(account_info->>'region', '') = '';
+```
 
 ## 트러블슈팅
 
