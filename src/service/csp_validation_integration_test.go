@@ -138,7 +138,7 @@ func TestIntegrationAWSSecretKey_GetCallerIdentity(t *testing.T) {
 	ctx := context.Background()
 
 	awsSvc := NewAwsCredentialService()
-	detail, err := awsSvc.CheckCallerIdentity(ctx, accessKeyID, secretKey)
+	detail, err := awsSvc.CheckCallerIdentity(ctx, accessKeyID, secretKey, "")
 
 	require.NoError(t, err, "GetCallerIdentity 실패 — 자격증명 확인 필요")
 	assert.Contains(t, detail, "Account=")
@@ -153,7 +153,7 @@ func TestIntegrationAWSSecretKey_InvalidKey(t *testing.T) {
 	ctx := context.Background()
 
 	awsSvc := NewAwsCredentialService()
-	_, err := awsSvc.CheckCallerIdentity(ctx, "AKIAINVALIDKEYXXX", "invalidsecretkey1234567890")
+	_, err := awsSvc.CheckCallerIdentity(ctx, "AKIAINVALIDKEYXXX", "invalidsecretkey1234567890", "")
 
 	assert.Error(t, err)
 	t.Logf("expected error: %v", err)

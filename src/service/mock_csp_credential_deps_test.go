@@ -17,16 +17,19 @@ type mockAwsCredService struct {
 	samlResult *model.CspCredentialResponse
 	samlErr    error
 	samlCalls  int
+	lastRegion string // STS 호출에 넘어온 region (IAM-BUG-065)
 }
 
 func (m *mockAwsCredService) AssumeRoleWithWebIdentity(_ context.Context, roleArn, kcUserId, token, idpArn, region string) (*model.CspCredentialResponse, error) {
+	m.lastRegion = region
 	return m.oidcResult, m.oidcErr
 }
 func (m *mockAwsCredService) AssumeRoleWithSAML(_ context.Context, roleArn, principalArn, samlAssertion, region string) (*model.CspCredentialResponse, error) {
 	m.samlCalls++
+	m.lastRegion = region
 	return m.samlResult, m.samlErr
 }
-func (m *mockAwsCredService) CheckCallerIdentity(_ context.Context, accessKeyID, secretKey string) (string, error) {
+func (m *mockAwsCredService) CheckCallerIdentity(_ context.Context, accessKeyID, secretKey, _ string) (string, error) {
 	return "", nil
 }
 
@@ -93,9 +96,11 @@ type mockTencentCredService struct {
 	oidcResult         *model.CspCredentialResponse
 	oidcErr            error
 	capturedProviderId string
+	calls              int
 }
 
 func (m *mockTencentCredService) AssumeRoleWithSAML(_ context.Context, secretID, secretKey, roleArn, principalArn, samlAssertion, region string) (*model.CspCredentialResponse, error) {
+	m.calls++
 	return m.result, m.err
 }
 

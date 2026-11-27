@@ -88,7 +88,7 @@ func (m *mockValAwsService) VerifyTargetTrustPolicy(_ context.Context, role *mod
 	}
 	return &model.TrustPolicyCheck{Status: model.TrustPolicyOK, RoleName: role.Name}
 }
-func (m *mockValAwsService) CheckCallerIdentity(_ context.Context, accessKeyID, secretKey string) (string, error) {
+func (m *mockValAwsService) CheckCallerIdentity(_ context.Context, accessKeyID, secretKey, _ string) (string, error) {
 	if m.callerIdentityErr != nil {
 		return "", m.callerIdentityErr
 	}

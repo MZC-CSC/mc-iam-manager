@@ -6,7 +6,7 @@ import "time"
 type CspCredentialRequest struct {
 	WorkspaceID string `json:"workspaceId"`         // 대상 워크스페이스 ID
 	CspType     string `json:"cspType"`             // 대상 CSP 타입
-	Region      string `json:"region"`              // AWS 리전 (선택적)
+	Region      string `json:"region"`              // 리전 (선택). 없으면 대상 CSP 계정의 account_info.region
 	AuthMethod  string `json:"authMethod,omitempty"` // 인증방식 (OIDC/SAML/SECRET_KEY), 미지정 시 매핑에서 결정
 }
 
@@ -24,6 +24,10 @@ type CspCredentialResponse struct {
 	Region          string    `json:"region,omitempty"`           // Optional: AWS/Alibaba Region
 	// UsedRole 발급에 사용한 워크스페이스 역할과 출처 (직접 배정 우선, 없으면 그룹 역할)
 	UsedRole *UsedWorkspaceRole `json:"usedRole,omitempty"`
+	// RegionSource region 출처: request(요청) | account(CSP 계정 account_info.region) | none(둘 다 없음 — region 비움)
+	RegionSource string `json:"regionSource,omitempty"`
+	// Warnings 발급은 됐지만 알릴 내용 (예: 계정 region 미설정으로 글로벌 STS 사용)
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // TempCredential 임시 자격 증명 관리 테이블 모델

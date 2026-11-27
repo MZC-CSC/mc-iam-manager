@@ -430,12 +430,12 @@ func TestReadiness_AssumeRegion(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"ap-northeast-2"}, f.assumer.regions)
 
-	// 계정에 region 이 없으면 기본 리전 (빈 region 은 STS endpoint 해석 실패)
+	// 계정에 region 이 없으면 글로벌 STS 리전 (하드코딩 기본 리전 없음, IAM-BUG-065)
 	f = newRdFixture()
 	f.account.AccountInfo = map[string]string{"account_id": "111122223333"}
 	_, err = f.svc.GetReadiness(context.Background(), 1, adminIssue)
 	require.NoError(t, err)
-	assert.Equal(t, []string{readinessDefaultAwsRegion}, f.assumer.regions)
+	assert.Equal(t, []string{"us-east-1"}, f.assumer.regions)
 
 	f = newRdFixture()
 	f.account.AccountInfo["region"] = "us-east-1"

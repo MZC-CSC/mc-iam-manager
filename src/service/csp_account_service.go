@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/m-cmp/mc-iam-manager/model"
@@ -51,6 +52,11 @@ func (s *CspAccountService) CreateCspAccount(req *model.CreateCspAccountRequest)
 	}
 	if exists {
 		return nil, fmt.Errorf("CSP account with name '%s' and type '%s' already exists", req.Name, req.CspType)
+	}
+
+	// region: 호출에 region 이 필수인 CSP 는 생성 시 필수, 값이 있으면 형식 검증 (IAM-BUG-065)
+	if err := validateAccountRegion(req.CspType, req.AccountInfo); err != nil {
+		return nil, err
 	}
 
 	// CSP 계정 생성
@@ -126,7 +132,24 @@ func (s *CspAccountService) UpdateCspAccount(id uint, req *model.UpdateCspAccoun
 		account.Name = req.Name
 	}
 	if req.AccountInfo != nil {
-		account.AccountInfo = req.AccountInfo
+		// region 키가 없으면 기존 값을 보존한다 (IAM-TECH-046 ① 중 region 만 선처리, IAM-BUG-065).
+		// 빈 문자열("region": "")은 명시적 삭제로 본다. 나머지 키는 지금처럼 통째로 바꾼다
+		info := make(map[string]string, len(req.AccountInfo)+1)
+		for k, v := range req.AccountInfo {
+			info[k] = v
+		}
+		if _, ok := info["region"]; !ok {
+			if prev := account.GetRegion(); prev != "" {
+				info["region"] = prev
+			}
+		}
+		if strings.TrimSpace(info["region"]) == "" {
+			delete(info, "region")
+		}
+		if err := validateAccountRegion(account.CspType, info); err != nil {
+			return nil, err
+		}
+		account.AccountInfo = info
 	}
 	if req.IsActive != nil {
 		account.IsActive = *req.IsActive
@@ -335,7 +358,12 @@ func (s *CspAccountService) validateAWSRole(ctx context.Context, role *model.Csp
 			result.Error = "access_key_id or secret_access_key is empty in CspIdpConfig"
 			return
 		}
-		detail, err := s.awsCredService.CheckCallerIdentity(ctx, accessKeyID, secretKey)
+		// region: 계정 account_info.region, 없으면 글로벌 (IAM-BUG-065)
+		region := awsCallRegion("")
+		if reg, rerr := ResolveCspRegion("aws", "", cspRoleAccount(role)); rerr == nil {
+			region = reg.CallRegion
+		}
+		detail, err := s.awsCredService.CheckCallerIdentity(ctx, accessKeyID, secretKey, region)
 		if err != nil {
 			result.Valid = false
 			result.Error = fmt.Sprintf("CallerIdentity check failed: %v", err)
@@ -427,4 +455,16 @@ func (s *CspAccountService) DeactivateCspAccount(id uint) error {
 
 	log.Printf("Deactivated CSP account: %s (ID: %d)", account.Name, account.ID)
 	return nil
+}
+
+// validateAccountRegion 계정 account_info.region 검증: 호출에 region 이 필수인 CSP(tencent)는 필수, 값이 있으면 형식
+func validateAccountRegion(cspType string, info map[string]string) error {
+	region := strings.TrimSpace(info["region"])
+	if region == "" {
+		if regionRequiredForCall(cspType) {
+			return fmt.Errorf("%w (csp_type %s)", ErrRegionRequired, cspType)
+		}
+		return nil
+	}
+	return ValidateRegionFormat(region)
 }

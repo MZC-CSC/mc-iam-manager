@@ -59,7 +59,8 @@ func (r *CspMappingRepository) FindCspRoleMappingsByRoleIDAndCspType(roleID uint
 
 	// CspRoles 배열을 채우기 위해 CspRole 정보를 조회 (CspIdpConfig 포함)
 	var cspRole model.CspRole
-	if err := r.db.Preload("CspIdpConfig").Where("id = ?", targetMapping.CspRoleID).First(&cspRole).Error; err != nil {
+	// CspAccount: 발급·진단의 기본 region(account_info.region) 결정에 쓴다 (IAM-BUG-065)
+	if err := r.db.Preload("CspIdpConfig.CspAccount").Preload("CspAccount").Where("id = ?", targetMapping.CspRoleID).First(&cspRole).Error; err != nil {
 		if err != gorm.ErrRecordNotFound {
 			return nil, err
 		}

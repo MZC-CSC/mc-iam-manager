@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/m-cmp/mc-iam-manager/model"
@@ -378,7 +377,21 @@ func (s *CspValidationService) ValidateCredentials(ctx context.Context, userID u
 		return nil, fmt.Errorf("invalid workspaceId: %s", req.WorkspaceID)
 	}
 
-	resp, err := s.dispatchValidation(ctx, userID, kcUserID, workspaceIDInt, cspType, authMethod, steps)
+	// region: 요청 → 대상 CspRole 의 CSP 계정 account_info.region (IAM-BUG-065). 형식 오류는 단계 실행 전에 거절
+	if strings.TrimSpace(req.Region) != "" {
+		if err := ValidateRegionFormat(strings.TrimSpace(req.Region)); err != nil {
+			return nil, err
+		}
+	}
+	rc := &validationRegion{requested: req.Region}
+	resp, err := s.dispatchValidation(ctx, userID, kcUserID, workspaceIDInt, cspType, authMethod, steps, rc)
+	if err == nil && resp != nil && rc.used != nil {
+		resp.Region = rc.used.Region
+		resp.RegionSource = rc.used.Source
+		if rc.used.Warning != "" {
+			resp.Warnings = append(resp.Warnings, rc.used.Warning)
+		}
+	}
 	if err == nil && resp != nil {
 		// 응답에 사용한 역할(발급과 같은 결정)을 싣는다. 조회 실패는 진단 결과에 영향을 주지 않는다
 		if used, rerr := s.resolveUserRepo().FindEffectiveUserRoleInWorkspace(userID, workspaceIDInt); rerr == nil {
@@ -389,16 +402,16 @@ func (s *CspValidationService) ValidateCredentials(ctx context.Context, userID u
 }
 
 // dispatchValidation CSP·인증 방식별 단계 검증으로 보낸다
-func (s *CspValidationService) dispatchValidation(ctx context.Context, userID uint, kcUserID string, workspaceIDInt uint, cspType, authMethod string, steps []model.ValidationStep) (*model.CspValidationResponse, error) {
+func (s *CspValidationService) dispatchValidation(ctx context.Context, userID uint, kcUserID string, workspaceIDInt uint, cspType, authMethod string, steps []model.ValidationStep, rc *validationRegion) (*model.CspValidationResponse, error) {
 	switch cspType {
 	case "aws":
 		switch authMethod {
 		case string(model.AuthMethodOIDC):
-			return s.validateAWSWithOIDC(ctx, userID, kcUserID, workspaceIDInt, cspType, authMethod, steps)
+			return s.validateAWSWithOIDC(ctx, userID, kcUserID, workspaceIDInt, cspType, authMethod, steps, rc)
 		case string(model.AuthMethodSAML):
-			return s.validateAWSWithSAML(ctx, userID, workspaceIDInt, cspType, authMethod, steps)
+			return s.validateAWSWithSAML(ctx, userID, workspaceIDInt, cspType, authMethod, steps, rc)
 		case string(model.AuthMethodSecretKey):
-			return s.validateAWSWithSecretKey(ctx, userID, workspaceIDInt, cspType, authMethod, steps)
+			return s.validateAWSWithSecretKey(ctx, userID, workspaceIDInt, cspType, authMethod, steps, rc)
 		}
 	case "gcp":
 		switch authMethod {
@@ -412,7 +425,7 @@ func (s *CspValidationService) dispatchValidation(ctx context.Context, userID ui
 
 // --- AWS OIDC (6단계) ---
 
-func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID uint, kcUserID string, workspaceID uint, cspType, authMethod string, steps []model.ValidationStep) (*model.CspValidationResponse, error) {
+func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID uint, kcUserID string, workspaceID uint, cspType, authMethod string, steps []model.ValidationStep, rc *validationRegion) (*model.CspValidationResponse, error) {
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
 	if !stepRunner(steps, 0, nil, func() (string, error) {
@@ -482,10 +495,7 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 	}
 
 	// Step 6: 임시자격증명 발급
-	defaultRegion := os.Getenv("AWS_REGION")
-	if defaultRegion == "" {
-		defaultRegion = "ap-northeast-2"
-	}
+	defaultRegion := rc.resolve(cspType, mapping)
 	var credSummary *model.CredentialSummary
 	if !stepRunner(steps, 5, nil, func() (string, error) {
 		creds, err := s.awsCredService.AssumeRoleWithWebIdentity(ctx, roleArn, kcUserID, accessToken, idpArn, defaultRegion)
@@ -513,7 +523,7 @@ func (s *CspValidationService) validateAWSWithOIDC(ctx context.Context, userID u
 
 // --- AWS SAML (7단계) ---
 
-func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID uint, workspaceID uint, cspType, authMethod string, steps []model.ValidationStep) (*model.CspValidationResponse, error) {
+func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID uint, workspaceID uint, cspType, authMethod string, steps []model.ValidationStep, rc *validationRegion) (*model.CspValidationResponse, error) {
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
 	if !stepRunner(steps, 0, nil, func() (string, error) {
@@ -595,10 +605,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 	}
 
 	// Step 7: 임시자격증명 발급
-	samlDefaultRegion := os.Getenv("AWS_REGION")
-	if samlDefaultRegion == "" {
-		samlDefaultRegion = "ap-northeast-2"
-	}
+	samlDefaultRegion := rc.resolve(cspType, mapping)
 	var credSummary *model.CredentialSummary
 	if !stepRunner(steps, 6, nil, func() (string, error) {
 		creds, err := s.awsCredService.AssumeRoleWithSAML(ctx, roleArn, principalArn, samlAssertion, samlDefaultRegion)
@@ -626,7 +633,7 @@ func (s *CspValidationService) validateAWSWithSAML(ctx context.Context, userID u
 
 // --- AWS SECRET_KEY (3단계) ---
 
-func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, userID uint, workspaceID uint, cspType, authMethod string, steps []model.ValidationStep) (*model.CspValidationResponse, error) {
+func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, userID uint, workspaceID uint, cspType, authMethod string, steps []model.ValidationStep, rc *validationRegion) (*model.CspValidationResponse, error) {
 	// Step 1: DB 매핑 조회
 	var mapping *model.RoleMasterCspRoleMapping
 	if !stepRunner(steps, 0, nil, func() (string, error) {
@@ -666,7 +673,7 @@ func (s *CspValidationService) validateAWSWithSecretKey(ctx context.Context, use
 
 	// Step 3: AWS 연결 확인 (GetCallerIdentity)
 	if !stepRunner(steps, 2, awsSecretKeyInvalidRemediation, func() (string, error) {
-		return s.awsCredService.CheckCallerIdentity(ctx, accessKeyID, secretKey)
+		return s.awsCredService.CheckCallerIdentity(ctx, accessKeyID, secretKey, rc.resolve(cspType, mapping))
 	}) {
 		return buildFailedResponse(cspType, authMethod, 3, steps), nil
 	}
@@ -787,4 +794,25 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// validationRegion 진단의 region: 요청 값과 실제로 쓴 결과 (발급과 같은 ResolveCspRegion, IAM-BUG-065)
+type validationRegion struct {
+	requested string
+	used      *CspRegion
+}
+
+// resolve 대상 CspRole 의 계정까지 보고 호출 region 을 정한다. 진단 대상 aws 는 region 필수가 아니므로
+// 오류(형식 오류는 ValidateCredentials 에서 먼저 거절)가 나면 글로벌 리전으로 진행한다.
+func (rc *validationRegion) resolve(cspType string, mapping *model.RoleMasterCspRoleMapping) string {
+	var role *model.CspRole
+	if mapping != nil && len(mapping.CspRoles) > 0 {
+		role = mapping.CspRoles[0]
+	}
+	reg, err := ResolveCspRegion(cspType, rc.requested, cspRoleAccount(role))
+	if err != nil {
+		reg = CspRegion{Source: RegionSourceNone, CallRegion: awsCallRegion("")}
+	}
+	rc.used = &reg
+	return reg.CallRegion
 }
