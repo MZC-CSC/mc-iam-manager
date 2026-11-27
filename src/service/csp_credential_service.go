@@ -92,7 +92,14 @@ func (s *CspCredentialService) resolveMappingRepo() credMappingRepo {
 }
 
 // GetTemporaryCredentials 사용자의 워크스페이스 역할에 기반하여 CSP 임시 자격 증명 발급
-func (s *CspCredentialService) GetTemporaryCredentials(ctx context.Context, userID uint, kcUserId string, req *model.CspCredentialRequest) (*model.CspCredentialResponse, error) {
+func (s *CspCredentialService) GetTemporaryCredentials(ctx context.Context, userID uint, kcUserId string, req *model.CspCredentialRequest) (resp *model.CspCredentialResponse, err error) {
+	// 발급에 사용한 역할을 응답에 싣는다 (아래 1단계에서 결정)
+	var usedRole *model.EffectiveWorkspaceRole
+	defer func() {
+		if resp != nil && usedRole != nil {
+			resp.UsedRole = usedRole.ToUsedRole()
+		}
+	}()
 	log.Printf("[CSP_CREDENTIAL] Starting GetTemporaryCredentials - UserID: %d, WorkspaceID: %s, CspType: %s", userID, req.WorkspaceID, req.CspType)
 
 	workspaceIDInt, err := util.StringToUint(req.WorkspaceID)
@@ -127,7 +134,8 @@ func (s *CspCredentialService) GetTemporaryCredentials(ctx context.Context, user
 		log.Printf("[CSP_CREDENTIAL] Error: user has no role assigned in workspace %d", workspaceIDInt)
 		return nil, ErrNoWorkspaceRoleAssigned
 	}
-	log.Printf("[CSP_CREDENTIAL] Found user workspace role - RoleID: %d", userWorkspaceRole.RoleID)
+	usedRole = userWorkspaceRole
+	log.Printf("[CSP_CREDENTIAL] Found user workspace role - RoleID: %d, source: %s", userWorkspaceRole.RoleID, userWorkspaceRole.Source)
 
 	// 2. Find the first matching CSP role mapping (authMethod 지정 시 해당 방식 매핑만 조회)
 	log.Printf("[CSP_CREDENTIAL] Finding CSP role mappings for role %d, csp type %s, authMethod %s", userWorkspaceRole.RoleID, cspType, req.AuthMethod)

@@ -22,6 +22,8 @@ type CspCredentialResponse struct {
 	SecurityToken   string    `json:"securityToken,omitempty"`    // Alibaba STS Security Token
 	Expiration      time.Time `json:"expiration"`                 // Expiration time
 	Region          string    `json:"region,omitempty"`           // Optional: AWS/Alibaba Region
+	// UsedRole 발급에 사용한 워크스페이스 역할과 출처 (직접 배정 우선, 없으면 그룹 역할)
+	UsedRole *UsedWorkspaceRole `json:"usedRole,omitempty"`
 }
 
 // TempCredential 임시 자격 증명 관리 테이블 모델

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -419,6 +420,8 @@ func (h *RoleHandler) DeleteRole(c echo.Context) error {
 // @Param request body model.AssignRoleRequest true "Role Assignment Info"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string "없는 사용자·워크스페이스·역할"
+// @Failure 409 {object} map[string]string "같은 워크스페이스 역할이 이미 할당됨"
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/roles/id/{roleId}/assign [post]
@@ -528,11 +531,17 @@ func (h *RoleHandler) AssignRole(c echo.Context) error {
 			log.Printf("Workspace ID missing - userID: %d, roleID: %s", userID, req.RoleID)
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Workspace ID is required"})
 		}
-		if err := h.roleService.AssignWorkspaceRole(userID, workspaceID, roleID); err != nil {
+		result, err := h.roleService.AssignWorkspaceRole(userID, workspaceID, roleID, req.Replace)
+		if err != nil {
 			log.Printf("Failed to assign workspace role - userID: %d, workspaceID: %d, roleID: %s, error: %v",
 				userID, workspaceID, req.RoleID, err)
+			if code, body, ok := workspaceRoleAssignErrorResponse(err); ok {
+				return c.JSON(code, body)
+			}
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to assign workspace role: %v", err)})
 		}
+		log.Printf("Successfully assigned role - userID: %d, roleID: %s, roleType: %s, action: %s", userID, req.RoleID, reqRoleType, result.Action)
+		return c.JSON(http.StatusOK, workspaceRoleAssignSuccessBody(fmt.Sprintf("%s role assigned successfully", reqRoleType), result))
 	}
 
 	log.Printf("Successfully assigned role - userID: %d, roleID: %s, roleType: %s", userID, req.RoleID, reqRoleType)
@@ -1902,7 +1911,9 @@ func (h *RoleHandler) RemovePlatformRole(c echo.Context) error {
 // @Produce json
 // @Param request body model.AssignWorkspaceRoleRequest true "Workspace Role Assignment Info"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} map[string]string
+// @Failure 400 {object} map[string]string "요청 형식 오류, workspace 유형이 아닌 역할"
+// @Failure 404 {object} map[string]string "없는 사용자·워크스페이스·역할"
+// @Failure 409 {object} map[string]string "같은 역할이 이미 할당됨"
 // @Failure 500 {object} map[string]string
 // @Security BearerAuth
 // @Router /api/roles/assign/workspace-role [post]
@@ -1977,12 +1988,15 @@ func (h *RoleHandler) AssignWorkspaceRole(c echo.Context) error {
 	}
 
 	// 역할 할당
-	err := h.roleService.AssignWorkspaceRole(userID, workspaceID, roleID)
+	result, err := h.roleService.AssignWorkspaceRole(userID, workspaceID, roleID, req.Replace)
 	if err != nil {
+		if code, body, ok := workspaceRoleAssignErrorResponse(err); ok {
+			return c.JSON(code, body)
+		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("역할 할당 실패: %v", err)})
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"message": "역할이 성공적으로 할당되었습니다"})
+	return c.JSON(http.StatusOK, workspaceRoleAssignSuccessBody("역할이 성공적으로 할당되었습니다", result))
 }
 
 // @Summary Remove workspace role
@@ -2511,4 +2525,50 @@ func (h *RoleHandler) GetRoleMasterMappings(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, mappings)
+}
+
+// workspaceRoleAssignErrorResponse 직접 배정 오류를 HTTP 상태·본문으로 바꾼다 (구분 못 하면 false → 500).
+// 409 는 errorCode 로 구분한다: already_assigned(같은 역할), role_conflict(다른 역할, currentRole 포함 — replace=true 로 교체)
+func workspaceRoleAssignErrorResponse(err error) (int, map[string]interface{}, bool) {
+	body := map[string]interface{}{"error": err.Error()}
+	var conflict *service.WorkspaceRoleConflictError
+	switch {
+	case errors.As(err, &conflict):
+		body["errorCode"] = "role_conflict"
+		body["currentRole"] = map[string]interface{}{"roleId": conflict.CurrentRoleID, "roleName": conflict.CurrentRoleName}
+		return http.StatusConflict, body, true
+	case errors.Is(err, service.ErrWorkspaceRoleAlreadyAssigned):
+		body["errorCode"] = "already_assigned"
+		return http.StatusConflict, body, true
+	case errors.Is(err, service.ErrWorkspaceNotFound):
+		body["errorCode"] = "workspace_not_found"
+		return http.StatusNotFound, body, true
+	case errors.Is(err, service.ErrUserNotFound):
+		body["errorCode"] = "user_not_found"
+		return http.StatusNotFound, body, true
+	case errors.Is(err, service.ErrRoleNotFound):
+		body["errorCode"] = "role_not_found"
+		return http.StatusNotFound, body, true
+	case errors.Is(err, service.ErrNotWorkspaceRole):
+		body["errorCode"] = "not_workspace_role"
+		return http.StatusBadRequest, body, true
+	}
+	return 0, nil, false
+}
+
+// workspaceRoleAssignSuccessBody 직접 배정 성공 본문: 기존 message 에 action·roleId·roleName·previousRoleId·warnings 추가
+func workspaceRoleAssignSuccessBody(message string, r *service.WorkspaceRoleAssignResult) map[string]interface{} {
+	body := map[string]interface{}{
+		"message":  message,
+		"action":   r.Action,
+		"roleId":   r.RoleID,
+		"roleName": r.RoleName,
+	}
+	if r.PreviousRoleID != nil {
+		body["previousRoleId"] = *r.PreviousRoleID
+	}
+	if len(r.Warnings) > 0 {
+		body["warnings"] = r.Warnings
+	}
+	return body
 }

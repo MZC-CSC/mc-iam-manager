@@ -98,16 +98,9 @@ func (s *WorkspaceInvitationService) AcceptInvitation(invitationID, userID uint)
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// 워크스페이스 멤버로 등록
-		if invitation.RoleID != nil {
-			userWsRole := model.UserWorkspaceRole{
-				UserID:      userID,
-				WorkspaceID: invitation.WorkspaceID,
-				RoleID:      *invitation.RoleID,
-			}
-			if err := tx.Create(&userWsRole).Error; err != nil {
-				return err
-			}
+		// 워크스페이스 멤버로 등록 — 역할 할당 API 와 같은 규칙(직접 배정 1개, 이미 있으면 409, 교체 없음)
+		if err := assignInvitationRole(tx, userID, invitation); err != nil {
+			return err
 		}
 		// 초대 상태 업데이트
 		return tx.Model(&model.WorkspaceInvitation{}).
@@ -147,15 +140,9 @@ func (s *WorkspaceInvitationService) ApproveInvitation(invitationID uint) error 
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		if invitation.RoleID != nil {
-			userWsRole := model.UserWorkspaceRole{
-				UserID:      invitation.InviteeUserID,
-				WorkspaceID: invitation.WorkspaceID,
-				RoleID:      *invitation.RoleID,
-			}
-			if err := tx.Create(&userWsRole).Error; err != nil {
-				return err
-			}
+		// 역할 할당 API 와 같은 규칙(직접 배정 1개, 이미 있으면 409, 교체 없음)
+		if err := assignInvitationRole(tx, invitation.InviteeUserID, invitation); err != nil {
+			return err
 		}
 		return tx.Model(&model.WorkspaceInvitation{}).
 			Where("id = ?", invitationID).
@@ -173,4 +160,22 @@ func (s *WorkspaceInvitationService) RejectInvitationByAdmin(invitationID uint) 
 		return fmt.Errorf("invitation is not in PENDING_APPROVAL state (current: %s)", invitation.Status)
 	}
 	return s.invitationRepo.UpdateStatus(invitationID, model.InvitationStatusRejected)
+}
+
+// assignInvitationRole 초대의 역할을 직접 배정한다. 역할이 없는 초대는 아무것도 쓰지 않는다.
+// 사용자가 그 워크스페이스에 이미 역할이 있으면 ErrWorkspaceRoleAlreadyAssigned(같은 역할) 또는
+// *WorkspaceRoleConflictError(다른 역할) 이고, 초대 상태는 바뀌지 않는다. 역할 교체는 역할 할당 API 로 한다.
+func assignInvitationRole(tx *gorm.DB, userID uint, invitation *model.WorkspaceInvitation) error {
+	if invitation.RoleID == nil {
+		return nil
+	}
+	var role model.RoleMaster
+	if err := tx.First(&role, *invitation.RoleID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: id=%d", ErrRoleNotFound, *invitation.RoleID)
+		}
+		return fmt.Errorf("failed to find role %d: %w", *invitation.RoleID, err)
+	}
+	_, err := assignDirectWorkspaceRole(tx, userID, invitation.WorkspaceID, &role, false)
+	return err
 }

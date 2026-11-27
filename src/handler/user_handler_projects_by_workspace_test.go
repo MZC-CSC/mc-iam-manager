@@ -28,6 +28,8 @@ func setupUserProjectsByWorkspaceTestDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE mcmp_user_platform_roles (user_id INTEGER, role_id INTEGER, created_at DATETIME, PRIMARY KEY (user_id, role_id))`,
 		`CREATE TABLE mcmp_user_organizations (user_id INTEGER, organization_id INTEGER, created_at DATETIME)`,
 		`CREATE TABLE mcmp_group_workspace_roles (group_id INTEGER, workspace_id INTEGER, role_id INTEGER, created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE mcmp_organizations (id INTEGER PRIMARY KEY, name TEXT)`,
+		`INSERT INTO mcmp_organizations (id, name) VALUES (100, 'grp100')`,
 		`INSERT INTO mcmp_users (id, kc_id, username) VALUES (1, 'kc-direct', 'direct'), (2, 'kc-grouped', 'grouped'), (3, 'kc-outsider', 'outsider')`,
 		`INSERT INTO mcmp_workspaces (id, name) VALUES (1, 'ws1')`,
 		`INSERT INTO mcmp_projects (id, nsid, name) VALUES (1, 'ns01', 'p1')`,

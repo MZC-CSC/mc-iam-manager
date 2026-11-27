@@ -20,7 +20,7 @@ import (
 	"github.com/m-cmp/mc-iam-manager/middleware"
 	"github.com/m-cmp/mc-iam-manager/util"
 
-	// "github.com/m-cmp/mc-iam-manager/repository" // Removed unused import
+	"github.com/m-cmp/mc-iam-manager/repository"
 
 	// Ensure YAML is imported
 	"gorm.io/driver/postgres"
@@ -103,6 +103,11 @@ func main() {
 		&model.Company{},
 	); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
+	}
+
+	// 직접 배정 (user_id, workspace_id) 유니크 인덱스 — 기존 중복이 있으면 경고만 남기고 기동 계속 (IAM-BUG-050)
+	if _, err := repository.EnsureUserWorkspaceRoleUniqueIndex(db); err != nil {
+		log.Printf("[WARN] %v", err)
 	}
 
 	// Keycloak 초기화

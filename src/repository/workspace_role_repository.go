@@ -69,16 +69,6 @@ func (r *WorkspaceRoleRepository) Delete(id uint) error {
 	})
 }
 
-// AssignRole assign workspace role to user
-func (r *WorkspaceRoleRepository) AssignRole(userID, workspaceID, roleID uint) error {
-	userWorkspaceRole := model.UserWorkspaceRole{
-		UserID:      userID,
-		WorkspaceID: workspaceID,
-		RoleID:      roleID,
-	}
-	return r.db.Create(&userWorkspaceRole).Error
-}
-
 // RemoveRole remove user's workspace role
 func (r *WorkspaceRoleRepository) RemoveRole(userID, workspaceID, roleID uint) error {
 	return r.db.Where("user_id = ? AND workspace_id = ? AND role_id = ?", userID, workspaceID, roleID).

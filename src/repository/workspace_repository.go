@@ -71,7 +71,7 @@ func (r *WorkspaceRepository) FindWorkspaces(req *model.WorkspaceFilterRequest) 
 		if err != nil {
 			return nil, err
 		}
-		query = query.Where("id = ?", workspaceIdInt)
+		query = query.Where("mcmp_workspaces.id = ?", workspaceIdInt)
 	}
 
 	if req.WorkspaceName != "" {
@@ -94,8 +94,8 @@ func (r *WorkspaceRepository) FindWorkspaces(req *model.WorkspaceFilterRequest) 
 		if err != nil {
 			return nil, err
 		}
-		query = query.Joins("JOIN mcmp_user_workspace_roles ON mcmp_workspaces.id = mcmp_user_workspace_roles.workspace_id").
-			Where("mcmp_user_workspace_roles.user_id = ?", userIdInt)
+		// JOIN 대신 서브쿼리: 직접 배정이 여러 개 남은 사용자도 워크스페이스는 한 번만 나온다 (IAM-BUG-050)
+		query = query.Where("mcmp_workspaces.id IN (SELECT workspace_id FROM mcmp_user_workspace_roles WHERE user_id = ?)", userIdInt)
 	}
 
 	if err := query.Find(&workspaces).Error; err != nil {

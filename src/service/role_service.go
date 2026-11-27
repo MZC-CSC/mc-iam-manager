@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/m-cmp/mc-iam-manager/constants"
@@ -12,17 +13,21 @@ import (
 
 // RoleService 역할 관리 서비스
 type RoleService struct {
-	db             *gorm.DB
-	roleRepository *repository.RoleRepository
-	menuRepository *repository.MenuRepository
+	db                  *gorm.DB
+	roleRepository      *repository.RoleRepository
+	menuRepository      *repository.MenuRepository
+	userRepository      *repository.UserRepository
+	workspaceRepository *repository.WorkspaceRepository
 }
 
 // NewRoleService 새 RoleService 인스턴스 생성
 func NewRoleService(db *gorm.DB) *RoleService {
 	return &RoleService{
-		db:             db,
-		roleRepository: repository.NewRoleRepository(db),
-		menuRepository: repository.NewMenuRepository(db),
+		db:                  db,
+		roleRepository:      repository.NewRoleRepository(db),
+		menuRepository:      repository.NewMenuRepository(db),
+		userRepository:      repository.NewUserRepository(db),
+		workspaceRepository: repository.NewWorkspaceRepository(db),
 	}
 }
 
@@ -266,67 +271,42 @@ func (s *RoleService) AssignPlatformRole(userID, roleID uint) error {
 	return s.roleRepository.AssignPlatformRole(userID, roleID)
 }
 
-// AssignWorkspaceRole 워크스페이스 역할 할당
-func (s *RoleService) AssignWorkspaceRole(userID, workspaceID, roleID uint) error {
-	// 1. 역할이 존재하는지 확인
-	role, err := s.roleRepository.FindRoleByRoleID(roleID, constants.RoleTypeWorkspace)
+// AssignWorkspaceRole 워크스페이스 역할 직접 배정. 직접 배정은 (사용자, 워크스페이스)당 1개다 (IAM-BUG-050).
+// 다른 역할이 이미 있으면 *WorkspaceRoleConflictError, replace=true 면 한 트랜잭션에서 교체한다.
+// 오류는 핸들러가 HTTP 상태로 구분한다: ErrWorkspaceNotFound·ErrUserNotFound·ErrRoleNotFound(404),
+// ErrNotWorkspaceRole(400), ErrWorkspaceRoleAlreadyAssigned·ErrWorkspaceRoleConflict(409).
+// 그 워크스페이스에 다른 그룹 역할이 있으면 결과의 Warnings 에 넣는다(막지 않음).
+func (s *RoleService) AssignWorkspaceRole(userID, workspaceID, roleID uint, replace bool) (*WorkspaceRoleAssignResult, error) {
+	workspace, err := s.workspaceRepository.FindWorkspaceByID(workspaceID)
 	if err != nil {
-		return fmt.Errorf("역할 조회 실패: %w", err)
+		return nil, fmt.Errorf("failed to find workspace %d: %w", workspaceID, err)
 	}
-	if role == nil {
-		return fmt.Errorf("역할을 찾을 수 없습니다")
+	if workspace == nil {
+		return nil, fmt.Errorf("%w: id=%d", ErrWorkspaceNotFound, workspaceID)
 	}
 
-	// 2. 역할이 workspace 타입인지 확인
-	isWorkspaceRole := false
-	for _, sub := range role.RoleSubs {
-		if sub.RoleType == constants.RoleTypeWorkspace {
-			isWorkspaceRole = true
-			break
+	if _, err := s.userRepository.FindUserByID(userID); err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return nil, fmt.Errorf("%w: id=%d", ErrUserNotFound, userID)
 		}
-	}
-	if !isWorkspaceRole {
-		return fmt.Errorf("워크스페이스 역할이 아닙니다")
+		return nil, fmt.Errorf("failed to find user %d: %w", userID, err)
 	}
 
-	// 3. 역할 할당
-	return s.roleRepository.AssignWorkspaceRole(userID, workspaceID, roleID)
-}
-
-// AssignRole 역할 할당 (플랫폼/워크스페이스)
-func (s *RoleService) AssignRole(userID, workspaceID, roleID uint) error {
-	// 1. 역할이 존재하는지 확인
-	role, err := s.roleRepository.FindRoleByRoleID(roleID, "")
+	role, err := validateWorkspaceRole(s.roleRepository, roleID)
 	if err != nil {
-		return fmt.Errorf("역할 조회 실패: %w", err)
-	}
-	if role == nil {
-		return fmt.Errorf("역할을 찾을 수 없습니다")
+		return nil, err
 	}
 
-	// 2. 역할 타입 확인
-	isWorkspaceRole := false
-	isPlatformRole := false
-	for _, sub := range role.RoleSubs {
-		if sub.RoleType == constants.RoleTypeWorkspace {
-			isWorkspaceRole = true
-		}
-		if sub.RoleType == constants.RoleTypePlatform {
-			isPlatformRole = true
-		}
+	var result *WorkspaceRoleAssignResult
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		r, err := assignDirectWorkspaceRole(tx, userID, workspaceID, role, replace)
+		result = r
+		return err
+	}); err != nil {
+		return nil, err
 	}
-
-	// 3. 역할 타입에 따라 할당
-	if isWorkspaceRole {
-		if workspaceID == 0 {
-			return fmt.Errorf("워크스페이스 역할 할당을 위해 워크스페이스 ID가 필요합니다")
-		}
-		return s.roleRepository.AssignWorkspaceRole(userID, workspaceID, roleID)
-	} else if isPlatformRole {
-		return s.roleRepository.AssignPlatformRole(userID, roleID)
-	} else {
-		return fmt.Errorf("지원하지 않는 역할 타입입니다")
-	}
+	result.Warnings = directOverrideWarnings(s.db, userID, workspaceID, role.ID, role.Name)
+	return result, nil
 }
 
 // RemovePlatformRole 플랫폼 역할 제거

@@ -3439,12 +3439,10 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "201": {
-                        "description": "Created",
+                        "description": "message, warnings(직접 배정 때문에 그룹 역할이 적용되지 않는 멤버)",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "additionalProperties": true
                         }
                     },
                     "400": {
@@ -3570,12 +3568,10 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "message, warnings(직접 배정 때문에 그룹 역할이 적용되지 않는 멤버)",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "additionalProperties": true
                         }
                     },
                     "400": {
@@ -3786,6 +3782,13 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    },
+                    "409": {
+                        "description": "초대 대상이 이미 그 워크스페이스에 역할이 있음 (errorCode already_assigned|role_conflict)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -6931,7 +6934,25 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "요청 형식 오류, workspace 유형이 아닌 역할",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "없는 사용자·워크스페이스·역할",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "같은 역할이 이미 할당됨",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8089,6 +8110,24 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "없는 사용자·워크스페이스·역할",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "같은 워크스페이스 역할이 이미 할당됨",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -11613,6 +11652,13 @@ const docTemplate = `{
                                 "type": "string"
                             }
                         }
+                    },
+                    "409": {
+                        "description": "이미 그 워크스페이스에 역할이 있음 (errorCode already_assigned|role_conflict)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
                     }
                 }
             }
@@ -12398,8 +12444,12 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "204": {
-                        "description": "No Content"
+                    "200": {
+                        "description": "message, action(created), roleId, roleName, warnings(그룹 역할 대신 직접 배정이 적용될 때)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
                     },
                     "400": {
                         "description": "Bad Request",
@@ -13771,6 +13821,10 @@ const docTemplate = `{
         "model.AssignRoleRequest": {
             "type": "object",
             "properties": {
+                "replace": {
+                    "description": "Replace workspace 유형: 다른 역할이 이미 직접 배정돼 있으면 교체한다 (없으면 409 + currentRole)",
+                    "type": "boolean"
+                },
                 "roleId": {
                     "description": "역할 ID (문자열로 받음)",
                     "type": "string"
@@ -13830,6 +13884,10 @@ const docTemplate = `{
         "model.AssignWorkspaceRoleRequest": {
             "type": "object",
             "properties": {
+                "replace": {
+                    "description": "Replace 다른 역할이 이미 직접 배정돼 있으면 교체한다 (없으면 409 + currentRole)",
+                    "type": "boolean"
+                },
                 "roleId": {
                     "description": "역할 ID (문자열로 받음)",
                     "type": "string"
@@ -15023,6 +15081,14 @@ const docTemplate = `{
                         "$ref": "#/definitions/model.ValidationStep"
                     }
                 },
+                "usedRole": {
+                    "description": "UsedRole 진단에 사용한 워크스페이스 역할과 출처 (발급과 같은 결정 규칙). 역할이 없으면 생략",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.UsedWorkspaceRole"
+                        }
+                    ]
+                },
                 "valid": {
                     "type": "boolean"
                 }
@@ -15049,10 +15115,41 @@ const docTemplate = `{
         "model.EffectiveWorkspaceRole": {
             "type": "object",
             "properties": {
+                "effective_role": {
+                    "description": "EffectiveRole 그 워크스페이스의 유효 역할 (직접 배정 우선, 없으면 그룹 역할 중 role_id 가 가장 작은 것)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.WorkspaceRoleRef"
+                        }
+                    ]
+                },
+                "group_id": {
+                    "description": "GroupID Source=group 일 때 역할을 준 그룹 (여러 그룹이면 group_id 가 가장 작은 것)",
+                    "type": "integer"
+                },
+                "group_roles": {
+                    "description": "GroupRoles 그 워크스페이스에 대해 소속 그룹들이 주는 역할 전부",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.GroupWorkspaceRoleRef"
+                    }
+                },
+                "is_effective": {
+                    "description": "아래는 목록 응답에서만 채운다 (워크스페이스 단위 값을 그 워크스페이스의 모든 행에 같이 싣는다)\nIsEffective 이 행이 그 워크스페이스에서 실제로 쓰이는 역할(발급·진단 기준)인지",
+                    "type": "boolean"
+                },
+                "overridden": {
+                    "description": "Overridden 직접 배정이 있고 그룹 역할과 다르면 true (그룹 역할이 적용되지 않음)",
+                    "type": "boolean"
+                },
                 "role_id": {
                     "type": "integer"
                 },
                 "role_name": {
+                    "type": "string"
+                },
+                "source": {
+                    "description": "Source 이 역할의 출처 (direct|group). 같은 역할이 직접·그룹 둘 다면 direct",
                     "type": "string"
                 },
                 "workspace_id": {
@@ -15130,6 +15227,23 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "group_id": {
+                    "type": "integer"
+                },
+                "group_name": {
+                    "type": "string"
+                },
+                "role_id": {
+                    "type": "integer"
+                },
+                "role_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.GroupWorkspaceRoleRef": {
+            "type": "object",
+            "properties": {
                 "group_id": {
                     "type": "integer"
                 },
@@ -16607,6 +16721,23 @@ const docTemplate = `{
                 }
             }
         },
+        "model.UsedWorkspaceRole": {
+            "type": "object",
+            "properties": {
+                "groupId": {
+                    "type": "integer"
+                },
+                "roleId": {
+                    "type": "integer"
+                },
+                "roleName": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        },
         "model.User": {
             "type": "object",
             "properties": {
@@ -16894,6 +17025,23 @@ const docTemplate = `{
                     }
                 },
                 "workspaceId": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.WorkspaceRoleRef": {
+            "type": "object",
+            "properties": {
+                "group_id": {
+                    "type": "integer"
+                },
+                "role_id": {
+                    "type": "integer"
+                },
+                "role_name": {
+                    "type": "string"
+                },
+                "source": {
                     "type": "string"
                 }
             }

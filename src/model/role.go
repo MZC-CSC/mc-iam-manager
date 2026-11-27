@@ -103,10 +103,82 @@ type RoleMasterMapping struct {
 	RoleMasterCspRoleMappings []RoleMasterCspRoleMapping `json:"role_master_csp_role_mappings" gorm:"-"`
 }
 
+// 워크스페이스 역할 출처
+const (
+	WorkspaceRoleSourceDirect = "direct" // 사용자 직접 배정 (mcmp_user_workspace_roles)
+	WorkspaceRoleSourceGroup  = "group"  // 소속 그룹의 워크스페이스 역할 (mcmp_group_workspace_roles)
+)
+
 // EffectiveWorkspaceRole 사용자의 유효 워크스페이스 역할 응답 (직접 할당 + 그룹 상속 통합)
+//
+// 단건 결정(FindEffectiveUserRoleInWorkspace)에서는 Source·GroupID 만 채운다.
+// 목록(FindEffectiveWorkspaceRoles, GET /api/users/me/workspace-roles)은 (워크스페이스, 역할) 행마다
+// 그 행의 출처와, 그 워크스페이스의 결정 결과(effective_role·group_roles·overridden)를 함께 싣는다.
+// 기존 필드(workspace_id·workspace_name·role_id·role_name)는 그대로다.
 type EffectiveWorkspaceRole struct {
 	WorkspaceID   uint   `json:"workspace_id"`
 	WorkspaceName string `json:"workspace_name"`
 	RoleID        uint   `json:"role_id"`
 	RoleName      string `json:"role_name"`
+
+	// Source 이 역할의 출처 (direct|group). 같은 역할이 직접·그룹 둘 다면 direct
+	Source string `json:"source,omitempty" gorm:"-"`
+	// GroupID Source=group 일 때 역할을 준 그룹 (여러 그룹이면 group_id 가 가장 작은 것)
+	GroupID *uint `json:"group_id,omitempty" gorm:"-"`
+
+	// 아래는 목록 응답에서만 채운다 (워크스페이스 단위 값을 그 워크스페이스의 모든 행에 같이 싣는다)
+	// IsEffective 이 행이 그 워크스페이스에서 실제로 쓰이는 역할(발급·진단 기준)인지
+	IsEffective *bool `json:"is_effective,omitempty" gorm:"-"`
+	// EffectiveRole 그 워크스페이스의 유효 역할 (직접 배정 우선, 없으면 그룹 역할 중 role_id 가 가장 작은 것)
+	EffectiveRole *WorkspaceRoleRef `json:"effective_role,omitempty" gorm:"-"`
+	// GroupRoles 그 워크스페이스에 대해 소속 그룹들이 주는 역할 전부
+	GroupRoles []GroupWorkspaceRoleRef `json:"group_roles,omitempty" gorm:"-"`
+	// Overridden 직접 배정이 있고 그룹 역할과 다르면 true (그룹 역할이 적용되지 않음)
+	Overridden *bool `json:"overridden,omitempty" gorm:"-"`
+}
+
+// WorkspaceRoleRef 결정된 워크스페이스 역할 (목록 응답용, snake_case)
+type WorkspaceRoleRef struct {
+	RoleID   uint   `json:"role_id"`
+	RoleName string `json:"role_name"`
+	Source   string `json:"source"`
+	GroupID  *uint  `json:"group_id,omitempty"`
+}
+
+// GroupWorkspaceRoleRef 그룹이 워크스페이스에 주는 역할
+type GroupWorkspaceRoleRef struct {
+	GroupID   uint   `json:"group_id"`
+	GroupName string `json:"group_name"`
+	RoleID    uint   `json:"role_id"`
+	RoleName  string `json:"role_name"`
+}
+
+// UsedWorkspaceRole 임시자격증명·진단에 사용한 워크스페이스 역할 (camelCase 응답용)
+type UsedWorkspaceRole struct {
+	RoleID   uint   `json:"roleId"`
+	RoleName string `json:"roleName"`
+	Source   string `json:"source"`
+	GroupID  *uint  `json:"groupId,omitempty"`
+}
+
+// ToUsedRole 단건 결정 결과를 응답용 값으로 바꾼다 (nil 이면 nil)
+func (e *EffectiveWorkspaceRole) ToUsedRole() *UsedWorkspaceRole {
+	if e == nil {
+		return nil
+	}
+	return &UsedWorkspaceRole{RoleID: e.RoleID, RoleName: e.RoleName, Source: e.Source, GroupID: e.GroupID}
+}
+
+// WorkspaceRoleResolution 한 사용자·워크스페이스의 역할 결정 결과
+type WorkspaceRoleResolution struct {
+	WorkspaceID   uint
+	WorkspaceName string
+	// DirectRoles 직접 배정 (role_id 오름차순). 정상은 0~1개, 기존 데이터는 여러 개일 수 있다
+	DirectRoles []WorkspaceRoleRef
+	// GroupRoles 그룹 역할 (role_id, group_id 오름차순)
+	GroupRoles []GroupWorkspaceRoleRef
+	// Effective 유효 역할 (없으면 nil)
+	Effective *EffectiveWorkspaceRole
+	// Overridden 직접 배정이 있고, 그와 다른 그룹 역할이 있음
+	Overridden bool
 }

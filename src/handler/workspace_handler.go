@@ -596,7 +596,7 @@ func (h *WorkspaceHandler) ListWorkspaceRoles(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Workspace ID"
 // @Param request body model.AssignRoleRequest true "userId and roleId (or roleName)"
-// @Success 204 "No Content"
+// @Success 200 {object} map[string]interface{} "message, action(created), roleId, roleName, warnings(그룹 역할 대신 직접 배정이 적용될 때)"
 // @Failure 400 {object} map[string]string
 // @Failure 404 {object} map[string]string
 // @Failure 409 {object} map[string]string
@@ -645,7 +645,8 @@ func (h *WorkspaceHandler) AddUserToWorkspace(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "roleId or roleName is required: specify a role with the workspace role type"})
 	}
 
-	if err := h.workspaceService.AddUserToWorkspace(workspaceID, userID, roleID, req.RoleName); err != nil {
+	result, err := h.workspaceService.AddUserToWorkspace(workspaceID, userID, roleID, req.RoleName)
+	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrWorkspaceNotFound), errors.Is(err, service.ErrUserNotFound), errors.Is(err, service.ErrRoleNotFound):
 			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -656,7 +657,8 @@ func (h *WorkspaceHandler) AddUserToWorkspace(c echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to add user: %v", err)})
 	}
-	return c.NoContent(http.StatusNoContent)
+	// 200 + 본문: 그룹 역할 대신 직접 배정이 적용되면 warnings 로 알린다 (IAM-BUG-050)
+	return c.JSON(http.StatusOK, workspaceRoleAssignSuccessBody("user added to workspace", result))
 }
 
 // RemoveUserFromWorkspace godoc

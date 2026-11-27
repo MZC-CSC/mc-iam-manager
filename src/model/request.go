@@ -53,6 +53,8 @@ type AssignRoleRequest struct {
 	RoleName    string `json:"roleName,omitempty"`    // 역할명
 	RoleType    string `json:"roleType"`              // 역할 타입 (platform/workspace)
 	WorkspaceID string `json:"workspaceId,omitempty"` // 워크스페이스 ID (문자열로 받음)
+	// Replace workspace 유형: 다른 역할이 이미 직접 배정돼 있으면 교체한다 (없으면 409 + currentRole)
+	Replace bool `json:"replace,omitempty"`
 }
 
 // RoleMasterSubRequest 역할 생성 요청 구조체
@@ -161,6 +163,8 @@ type AssignWorkspaceRoleRequest struct {
 	RoleID      string `json:"roleId,omitempty"`   // 역할 ID (문자열로 받음)
 	RoleName    string `json:"roleName,omitempty"` // 역할명
 	WorkspaceID string `json:"workspaceId"`        // 워크스페이스 ID (문자열로 받음)
+	// Replace 다른 역할이 이미 직접 배정돼 있으면 교체한다 (없으면 409 + currentRole)
+	Replace bool `json:"replace,omitempty"`
 }
 
 // RemoveWorkspaceRoleRequest 워크스페이스 역할 제거 요청 구조체
